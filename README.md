@@ -42,15 +42,21 @@ cargo build --workspace --locked --release --target wasm32v1-none
 make build
 ```
 
-`cargo clippy` treats every warning in repository code as an error; dependency
-lint output is excluded so the check focuses on this workspace. ShellCheck covers
-`deploy.sh` and `scripts/build.sh`; any suppression is scoped to a single line
-with an inline `# shellcheck disable=...` comment and a short justification.
-`cargo audit` reads `Cargo.lock` and fails on known advisories; install it with
-`cargo install cargo-audit --locked`. If an advisory must be deferred, add a
-time-bounded entry to `audit.toml` with an expiry and rationale, and remove it
-once the dependency is updated. CI runs all three checks on every push and pull
-request.
+`cargo clippy --workspace --all-targets --locked -- -D warnings` is part of the
+CI quality gate (`make ci` and the GitHub Actions workflow), so any lint warning
+in repository code fails the build. The pinned `clippy` component from
+`rust-toolchain.toml` is installed in CI before the check runs, and dependency
+lint output is excluded so the check focuses on this workspace. Exceptions are
+narrowly scoped and justified inline: an `#[allow(clippy::...)]` attribute must
+name the specific lint, apply to the smallest possible item, and carry a short
+comment explaining why the lint cannot be satisfied. Blanket crate-level allows
+are not accepted. ShellCheck covers `deploy.sh` and `scripts/build.sh`; any
+suppression is scoped to a single line with an inline `# shellcheck disable=...`
+comment and a short justification. `cargo audit` reads `Cargo.lock` and fails on
+known advisories; install it with `cargo install cargo-audit --locked`. If an
+advisory must be deferred, add a time-bounded entry to `audit.toml` with an
+expiry and rationale, and remove it once the dependency is updated. CI runs all
+of these checks on every push and pull request.
 
 `make build` and `deploy.sh` use `scripts/build.sh`, which explicitly selects the
 Rust version from `rust-toolchain.toml` for the CLI and its Cargo subprocesses.
@@ -232,10 +238,11 @@ fields, threshold, duplicate keys, valid uncompressed on-curve P-256 keys,
 32-byte RP ID hash, and a canonical HTTPS origin. It also validates the airdrop
 root and NFT constructor input. It cannot derive the RP ID from its hash, so the
 enrollment service must independently ensure the RP ID is valid for the origin.
-Use the `config`, `session`, `sessions_paused`, `admin`, and `is_reimbursed`
-read methods for operational monitoring. Account events use `session` topics for
-set, revoked, paused, and spent transitions; subsidy events use `subsidy` plus
-the reimbursement ID.
+Use the `config`, `session`, `sessions_paused`, `admin`, `is_reimbursed` and
+`active_epoch` read methods for operational monitoring. Account events use
+`session` topics for set, revoked, paused, and spent transitions; subsidy events
+use `subsidy` plus the reimbursement ID, and epoch rotation emits an event so
+operators can track the active epoch.
 
 `core` deploys router, verifier, account and subsidy vault. Account initialization
 and admin assignment happen atomically through constructors. A separate verifier
@@ -263,9 +270,20 @@ component. `make test`, `make build`, `make optimize`, `make deploy-testnet` and
 Fund the subsidy vault using a regular token transfer. Its administrator calls
 `reimburse(id, asset, recipient, amount)` once per unique 32-byte reimbursement ID.
 Only the administrator can select the asset, recipient and amount. Failed token
-transfers roll back the replay marker. Markers are retained in instance storage;
-this simple vault is intended for bounded deployments because markers grow with
-usage. Use a new vault for a new reimbursement epoch rather than deleting markers.
+transfers roll back the replay marker.
+
+Replay markers are bounded by an explicit epoch policy. The vault exposes
+`active_epoch()`, which returns the current epoch number, and the administrator
+can call `rotate_epoch()` to advance to the next epoch. Rotation clears the
+replay markers of the previous epoch, so instance storage grows only with the
+reimbursements recorded in the active epoch rather than for the vault's entire
+lifetime. Replay rejection is scoped to the active epoch: a reimbursement ID is
+rejected while its marker exists in the active epoch, and IDs from earlier
+epochs are no longer tracked. Operators must therefore treat reimbursement IDs
+as unique per epoch and choose a rotation cadence (for example, per settlement
+window) that keeps the active epoch's marker count within the intended storage
+budget. Rotate only after every reimbursement from the closing epoch has been
+settled and reconciled; markers from a rotated epoch cannot be recovered.
 
 This contract cannot pay Stellar transaction fees. A backend fee-bump sponsor
 must submit and fund transactions, enforce fee caps and reimbursement policy,
