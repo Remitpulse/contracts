@@ -9,4 +9,7 @@ pub enum NonFungibleTokenContractError {
     UnsetTokenData = 5,
     AlreadyMinted = 6,
     TokenDoesNotExist = 7,
+    MaxBatchExceeded = 8,
+    InsufficientSupply = 9,
+    InvalidCursor = 10,
 }

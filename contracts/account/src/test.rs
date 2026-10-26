@@ -25,14 +25,36 @@ fn register_account(e: &Env, config: Config) -> Address {
     }
 }
 
+/// A valid uncompressed P-256 point (the generator) used by constructor tests.
+fn valid_passkey(e: &Env) -> BytesN<65> {
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    BytesN::from_array(
+        e,
+        p256::ecdsa::SigningKey::from_bytes((&[3u8; 32]).into())
+            .unwrap()
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .try_into()
+            .unwrap(),
+    )
+}
+
+fn valid_config(e: &Env) -> Config {
+    Config {
+        keys: vec![e, valid_passkey(e)],
+        threshold: 1,
+        rp_id_hash: e
+            .crypto()
+            .sha256(&Bytes::from_slice(e, b"remitpulse.example"))
+            .into(),
+        origin: Bytes::from_slice(e, b"https://remitpulse.example"),
+    }
+}
+
 fn setup() -> (Env, Address, Address, SigningKey) {
     let e = Env::default();
-    let config = Config {
-        keys: vec![&e, BytesN::from_array(&e, &[4; 65])],
-        threshold: 1,
-        rp_id_hash: BytesN::from_array(&e, &[0; 32]),
-        origin: Bytes::from_slice(&e, b"https://remitpulse.example"),
-    };
+    let config = valid_config(&e);
     let account = register_account(&e, config);
     let token = e
         .register_stellar_asset_contract_v2(Address::generate(&e))
@@ -348,6 +370,58 @@ fn recipient_binding_and_emergency_pause() {
     assert_eq!(authorize(), Ok(()));
     assert_eq!(client.session(&public).unwrap().remaining, 5);
     assert_eq!(client.config().threshold, 1);
+}
+
+#[test]
+fn constructor_accepts_valid_config() {
+    let e = Env::default();
+    let account = e.register(Account, (valid_config(&e),));
+    assert_eq!(AccountClient::new(&e, &account).config().threshold, 1);
+}
+
+#[test]
+fn constructor_rejects_malformed_passkeys() {
+    let e = Env::default();
+    let mut short = valid_config(&e);
+    short.keys = vec![&e, BytesN::from_array(&e, &[4; 64])];
+    assert!(e.try_register(Account, (&short,)).is_err());
+
+    let mut bad_prefix = valid_config(&e);
+    let mut bytes = [4u8; 65];
+    bytes[0] = 0x03;
+    bad_prefix.keys = vec![&e, BytesN::from_array(&e, &bytes)];
+    assert!(e.try_register(Account, (&bad_prefix,)).is_err());
+
+    // Coordinates equal to the P-256 field prime are not on the curve.
+    let mut out_of_field = valid_config(&e);
+    let mut bytes = [0u8; 65];
+    bytes[0] = 4;
+    let prime = [
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff,
+    ];
+    bytes[1..33].copy_from_slice(&prime);
+    bytes[33..65].copy_from_slice(&prime);
+    out_of_field.keys = vec![&e, BytesN::from_array(&e, &bytes)];
+    assert!(e.try_register(Account, (&out_of_field,)).is_err());
+}
+
+#[test]
+fn constructor_rejects_malformed_origin() {
+    let e = Env::default();
+    for origin in [
+        &b"http://remitpulse.example"[..],
+        b"https://",
+        b"https://remitpulse.example/",
+        b"https://remit pulse.example",
+        b"https://remitpulse.example?x=1",
+        b"https://remitpulse.example#frag",
+    ] {
+        let mut config = valid_config(&e);
+        config.origin = Bytes::from_slice(&e, origin);
+        assert!(e.try_register(Account, (&config,)).is_err());
+    }
 }
 
 #[test]

@@ -40,13 +40,21 @@ Manages account sessions and passkey credentials. The account contract is the
 authorization root for user actions: sessions and passkeys are the two mechanisms by
 which a user authorizes calls.
 
-### `init`
+### constructor
 
 - **Auth:** `none` (invoked once at deployment).
-- **Input validation:** must not already be initialized; admin address must be non-zero.
-- **Storage effects:** writes admin address and initialization flag.
+- **Input validation:**
+  - Must not already be initialized; admin address must be non-zero.
+  - Each initial passkey public key must be an uncompressed P-256 (SEC1) point:
+    a valid `0x04`-prefixed encoding of a point on the P-256 curve.
+  - The RP ID binding must be a 32-byte hash (e.g. SHA-256 of the RP ID).
+  - The origin must be a canonical HTTPS origin (scheme `https`, a host, no path,
+    query, fragment, or trailing slash).
+- **Storage effects:** writes admin address, initial passkeys, RP ID hash, origin,
+  and initialization flag.
 - **Events:** none.
-- **Errors:** `AlreadyInitialized`, `InvalidAdmin`.
+- **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidPasskey`, `InvalidRpIdHash`,
+  `InvalidOrigin`.
 
 ### `create_session`
 
@@ -242,6 +250,53 @@ Read-only ownership lookup.
 - **Storage effects:** reads ownership record only.
 - **Events:** none.
 - **Errors:** `TokenNotFound`.
+
+### `bulk_mint_with_data`
+
+Mints multiple tokens with associated data in a single call.
+
+- **Auth:** `admin`.
+- **Input validation:**
+  - The batch must not exceed `MAX_BULK_MINT` (a conservative maximum batch size).
+  - Remaining supply must be at least the batch length; capacity is validated
+    **before any mutation**, so an over-capacity batch fails without minting.
+  - Recipients must be non-zero; token IDs must not already exist.
+- **Storage effects:** writes token ownership records and associated data; increments
+  total supply.
+- **Events:** `mint` — topics: `[mint, recipient, token_id]`; data: `(token_id)`.
+- **Errors:** `Unauthorized`, `MaxBatchExceeded`, `InsufficientSupply`,
+  `InvalidRecipient`, `TokenExists`.
+
+### `get_owner_tokens`
+
+Returns the complete list of token IDs owned by an address.
+
+- **Auth:** `none`.
+- **Input validation:** owner address required.
+- **Storage effects:** reads the owner's token list.
+- **Events:** none.
+- **Errors:** none.
+- **Deprecated:** retained for compatibility; prefer `get_owner_tokens_page`, whose
+  cost is bounded. This endpoint's read, serialization, and response cost grow without
+  bound as collections grow.
+
+### `get_owner_tokens_page`
+
+Returns a bounded page of token IDs owned by an address.
+
+- **Auth:** `none`.
+- **Input validation:**
+  - `limit` must be greater than zero and at most `MAX_OWNER_TOKENS_PAGE`.
+  - `cursor` must be `None` (first page) or a token ID previously returned as the
+    page's next cursor.
+- **Ordering:** results are returned in stable ascending token-ID order; pagination
+  preserves this ordering across calls.
+- **Return shape:** the page of token IDs plus the next cursor (`None` when the page
+  is the final page).
+- **Storage effects:** reads the owner's token list; extends the persistent TTL of
+  the owner-token storage entry.
+- **Events:** none.
+- **Errors:** `InvalidCursor`.
 
 ---
 

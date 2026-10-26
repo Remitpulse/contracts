@@ -1,7 +1,7 @@
 #![cfg(test)]
 extern crate std;
 use crate::{
-    contract::{Contract, ContractClient},
+    contract::{Contract, ContractClient, MAX_BULK_MINT},
     types::{TokenData, TokenMetadata},
 };
 use soroban_sdk::{
@@ -10,7 +10,7 @@ use soroban_sdk::{
         Address as _, AuthorizedFunction, AuthorizedInvocation, EnvTestConfig, Ledger as _,
         MockAuth, MockAuthInvoke,
     },
-    vec, Address, Env, IntoVal, String, Symbol,
+    vec, Address, Env, IntoVal, String, Symbol, TryFromVal, Vec,
 };
 
 const INITIAL_SEQUENCE_NUMBER: u32 = 10;
@@ -94,7 +94,10 @@ fn test_mint_success() {
     assert_eq!(token_id, 123456);
     assert_eq!(contract.total_supply(), 1);
     assert_eq!(contract.owner_of(&token_id), recipient);
-    assert_eq!(contract.get_owner_tokens(&recipient), vec![&env, token_id]);
+    assert_eq!(
+        contract.get_owner_tokens_page(&recipient, &None, &10u32),
+        vec![&env, token_id]
+    );
 }
 
 #[test]
@@ -138,7 +141,7 @@ fn test_bulk_mint_success() {
     assert_eq!(contract.owner_of(&123456), recipient);
     assert_eq!(contract.owner_of(&789012), recipient);
     assert_eq!(
-        contract.get_owner_tokens(&recipient),
+        contract.get_owner_tokens_page(&recipient, &None, &10u32),
         vec![&env, 123456, 789012]
     );
 }
@@ -297,8 +300,8 @@ fn test_get_owner_tokens() {
     contract.mint(&recipient1, &2u32);
     contract.mint(&recipient2, &3u32);
 
-    let recipient1_tokens = contract.get_owner_tokens(&recipient1);
-    let recipient2_tokens = contract.get_owner_tokens(&recipient2);
+    let recipient1_tokens = contract.get_owner_tokens_page(&recipient1, &None, &10u32);
+    let recipient2_tokens = contract.get_owner_tokens_page(&recipient2, &None, &10u32);
 
     assert_eq!(recipient1_tokens.len(), 2);
     assert_eq!(recipient2_tokens.len(), 1);
@@ -316,8 +319,190 @@ fn test_get_owner_tokens_empty() {
 
     contract.mint(&recipient, &1u32);
 
-    let empty_tokens = contract.get_owner_tokens(&empty_owner);
+    let empty_tokens = contract.get_owner_tokens_page(&empty_owner, &None, &10u32);
     assert_eq!(empty_tokens.len(), 0);
+}
+
+#[test]
+fn test_get_owner_tokens_page_empty() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let empty_owner = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 100u32);
+
+    let page = contract.get_owner_tokens_page(&empty_owner, &None, &5u32);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_owner_tokens_page_partial_and_final() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 100u32);
+
+    for id in 1..=5u32 {
+        contract.mint(&recipient, &id);
+    }
+
+    // First page: partial (limit 2).
+    let page1 = contract.get_owner_tokens_page(&recipient, &None, &2u32);
+    assert_eq!(page1, vec![&env, 1u32, 2u32]);
+
+    // Second page: continues after cursor 2.
+    let page2 = contract.get_owner_tokens_page(&recipient, &Some(2u32), &2u32);
+    assert_eq!(page2, vec![&env, 3u32, 4u32]);
+
+    // Final page: fewer than limit.
+    let page3 = contract.get_owner_tokens_page(&recipient, &Some(4u32), &2u32);
+    assert_eq!(page3, vec![&env, 5u32]);
+
+    // Past the end: empty.
+    let page4 = contract.get_owner_tokens_page(&recipient, &Some(5u32), &2u32);
+    assert_eq!(page4.len(), 0);
+}
+
+#[test]
+fn test_get_owner_tokens_page_invalid_cursor() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 100u32);
+
+    contract.mint(&recipient, &1u32);
+    contract.mint(&recipient, &2u32);
+
+    // Cursor not present in the owner's collection yields an empty page.
+    let page = contract.get_owner_tokens_page(&recipient, &Some(999u32), &10u32);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_bulk_mint_oversized_batch_rejected() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 1000u32);
+
+    let mut mint_args: Vec<(Address, u32, TokenData)> = Vec::new(&env);
+    for i in 0..(MAX_BULK_MINT + 1) {
+        mint_args.push_back((
+            recipient.clone(),
+            i,
+            TokenData {
+                session_id: String::from_str(&env, "s"),
+                resource: String::from_str(&env, "r"),
+            },
+        ));
+    }
+
+    let result = contract.try_bulk_mint_with_data(&mint_args);
+    assert!(result.is_err());
+    // No partial mint occurred.
+    assert_eq!(contract.total_supply(), 0);
+}
+
+#[test]
+fn test_bulk_mint_over_capacity_rejected() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    // Capacity for only 2 tokens.
+    let contract = get_contract(&env, &owner, 2u32);
+
+    let mint_args = vec![
+        &env,
+        (
+            recipient.clone(),
+            1u32,
+            TokenData {
+                session_id: String::from_str(&env, "s1"),
+                resource: String::from_str(&env, "r1"),
+            },
+        ),
+        (
+            recipient.clone(),
+            2u32,
+            TokenData {
+                session_id: String::from_str(&env, "s2"),
+                resource: String::from_str(&env, "r2"),
+            },
+        ),
+        (
+            recipient.clone(),
+            3u32,
+            TokenData {
+                session_id: String::from_str(&env, "s3"),
+                resource: String::from_str(&env, "r3"),
+            },
+        ),
+    ];
+
+    let result = contract.try_bulk_mint_with_data(&mint_args);
+    assert!(result.is_err());
+    // No partial mint occurred.
+    assert_eq!(contract.total_supply(), 0);
+}
+
+#[test]
+fn test_bulk_mint_exact_max_batch_succeeds() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 1000u32);
+
+    let mut mint_args: Vec<(Address, u32, TokenData)> = Vec::new(&env);
+    for i in 0..MAX_BULK_MINT {
+        mint_args.push_back((
+            recipient.clone(),
+            i,
+            TokenData {
+                session_id: String::from_str(&env, "s"),
+                resource: String::from_str(&env, "r"),
+            },
+        ));
+    }
+
+    contract.bulk_mint_with_data(&mint_args);
+    assert_eq!(contract.total_supply(), MAX_BULK_MINT);
+}
+
+#[test]
+fn test_ttl_renewal_keeps_state_accessible() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 100u32);
+
+    let token_data = TokenData {
+        session_id: String::from_str(&env, "session_ttl"),
+        resource: String::from_str(&env, "resource_ttl"),
+    };
+    let token_id = contract.mint_with_data(&recipient, &1u32, &token_data);
+
+    // Advance well past the initial TTL thresholds.
+    env.ledger()
+        .set_sequence_number(INITIAL_SEQUENCE_NUMBER + 100_000);
+
+    // Accessing state should renew TTLs and keep everything readable.
+    let retrieved = contract.get_token_data(&token_id);
+    assert_eq!(retrieved.session_id, token_data.session_id);
+    assert_eq!(retrieved.resource, token_data.resource);
+
+    let page = contract.get_owner_tokens_page(&recipient, &None, &10u32);
+    assert_eq!(page, vec![&env, token_id]);
+
+    // Instance state remains accessible.
+    assert_eq!(contract.get_max_supply(), 100u32);
+    assert_eq!(contract.total_supply(), 1);
+    assert_eq!(contract.owner_of(&token_id), recipient);
+
+    // Advance again and confirm renewed entries are still accessible.
+    env.ledger()
+        .set_sequence_number(INITIAL_SEQUENCE_NUMBER + 200_000);
+    assert_eq!(contract.owner_of(&token_id), recipient);
+    let retrieved_again = contract.get_token_data(&token_id);
+    assert_eq!(retrieved_again.session_id, token_data.session_id);
 }
 
 #[test]
@@ -492,3 +677,7 @@ fn test_mint_with_data_unauthorized() {
 
     contract.mint_with_data(&recipient, &1u32, &token_data);
 }
+
+// Silence unused import warnings for helpers used only in some configurations.
+#[allow(dead_code)]
+fn _assert_try_from_val<T: TryFromVal<Env, soroban_sdk::Val>>() {}
