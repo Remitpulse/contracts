@@ -257,6 +257,53 @@ if sys.argv[1:3] == ['contract', 'build']:
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("Deployment configuration invalid", result.stderr)
 
+    def test_invalid_addresses_never_build_or_deploy(self):
+        # Malformed strkeys and identities must be rejected before any CLI call.
+        bad_addresses = [
+            "",
+            " ",
+            " deployer",
+            "deployer ",
+            "G" + "A" * 55,          # wrong length
+            "G" + "A" * 57,          # wrong length
+            "G" + "0" * 55,          # invalid base32 characters
+            "G" + "A" * 54 + "1",    # bad checksum
+            "C" + "A" * 55,          # wrong length contract strkey
+            "S" + "A" * 55,          # secret key form is not accepted
+            "not a valid identity!",
+        ]
+        for variable in ("SOURCE_ACCOUNT", "ADMIN", "TOKEN", "FUNDER", "OWNER"):
+            for value in bad_addresses:
+                with self.subTest(variable=variable, value=value):
+                    result, calls, records = self.run_deploy(overrides={variable: value})
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("Deployment configuration invalid", result.stderr)
+                    self.assertEqual(calls, [])
+                    self.assertEqual(records, [])
+
+    def test_valid_addresses_are_accepted(self):
+        # Well-formed G/C strkeys and plain identity names must pass validation.
+        valid_addresses = [
+            "deployer",
+            "admin",
+            "funder",
+            "owner",
+            "G" + "A" * 55,
+            "C" + "A" * 55,
+        ]
+        for variable in ("SOURCE_ACCOUNT", "ADMIN", "TOKEN", "FUNDER", "OWNER"):
+            for value in valid_addresses:
+                with self.subTest(variable=variable, value=value):
+                    env = {**os.environ, "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
+                           "MAX_SUPPLY": "10",
+                           "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
+                    env.update({"SOURCE_ACCOUNT": "deployer", "ADMIN": "admin",
+                                "TOKEN": "asset", "FUNDER": "funder", "OWNER": "owner"})
+                    env[variable] = value
+                    result = subprocess.run([str(ROOT / "scripts/validate_deployment.py")],
+                                            env=env, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

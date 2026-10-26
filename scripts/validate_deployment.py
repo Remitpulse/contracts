@@ -2,12 +2,80 @@
 """Validate deployment constructor inputs locally before any network fees are spent."""
 import json
 import os
+import re
 import sys
 from urllib.parse import urlsplit
 
 # NIST P-256: reject malformed/off-curve passkey material before deploying an immutable account.
 P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
 B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+
+# Stellar strkeys are 56-character base32 (RFC 4648, no padding) with a CRC16-XModem checksum.
+STRKEY_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+STRKEY_VERSION_ACCOUNT = 6 << 3  # 'G'
+STRKEY_VERSION_CONTRACT = 2 << 3  # 'C'
+IDENTITY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def crc16_xmodem(data):
+    crc = 0
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
+            crc &= 0xFFFF
+    return crc
+
+
+def strkey(value, version, label):
+    if not isinstance(value, str) or len(value) != 56:
+        raise ValueError(f"{label} must be a 56-character Stellar address")
+    try:
+        decoded = bytes(
+            STRKEY_ALPHABET.index(char) if char in STRKEY_ALPHABET else -1 for char in value
+        )
+    except ValueError:
+        raise ValueError(f"{label} must be a 56-character Stellar address") from None
+    if -1 in decoded:
+        raise ValueError(f"{label} must be a 56-character Stellar address")
+    # Repack 5-bit groups into bytes; 56 chars carry 280 bits, of which 35 bytes are meaningful.
+    bits = 0
+    accumulator = 0
+    payload = bytearray()
+    for group in decoded:
+        accumulator = (accumulator << 5) | group
+        bits += 5
+        if bits >= 8:
+            bits -= 8
+            payload.append((accumulator >> bits) & 0xFF)
+    if len(payload) != 35 or payload[0] != version:
+        raise ValueError(f"{label} must be a 56-character Stellar address")
+    body, checksum = payload[:33], payload[33:]
+    if crc16_xmodem(body).to_bytes(2, "little") != checksum:
+        raise ValueError(f"{label} has an invalid checksum")
+    return value
+
+
+def account_address(value, label):
+    return strkey(value, STRKEY_VERSION_ACCOUNT, label)
+
+
+def contract_address(value, label):
+    return strkey(value, STRKEY_VERSION_CONTRACT, label)
+
+
+def account_or_identity(value, label):
+    """Accept a Stellar account address or a CLI identity name (e.g. 'alice')."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a Stellar account address or identity name")
+    if len(value) == 56 and value[0] == "G":
+        return account_address(value, label)
+    if not IDENTITY_NAME.fullmatch(value):
+        raise ValueError(
+            f"{label} must be a Stellar account address or an identity name "
+            "(letters, digits, '.', '_' or '-', at most 64 characters)"
+        )
+    return value
 
 
 def hex_bytes(value, length, label):
@@ -71,6 +139,13 @@ def validate(component, env):
         account_config(env["ACCOUNT_CONFIG"])
     if component == "airdrop":
         hex_bytes(env["ROOT_HASH"], 32, "ROOT_HASH")
+    if component == "nft":
+        account_or_identity(env["OWNER"], "OWNER")
+    if component == "core":
+        account_or_identity(env["SOURCE_ACCOUNT"], "SOURCE_ACCOUNT")
+        account_or_identity(env["ADMIN"], "ADMIN")
+        account_or_identity(env["FUNDER"], "FUNDER")
+        contract_address(env["TOKEN"], "TOKEN")
     if component == "nft":
         try:
             supply = int(env["MAX_SUPPLY"])
