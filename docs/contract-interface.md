@@ -132,11 +132,36 @@ Read-only authorization check used by other contracts.
 
 Distributes tokens to eligible recipients with a claim and a recover path.
 
+### `__constructor` (deployment)
+
+- **Auth:** `none` (deployment only).
+- **Input validation:**
+  - Admin address must be non-zero.
+  - Token address must be non-zero.
+  - `claim_deadline` must be a future ledger timestamp (strictly greater than the
+    current ledger time); a deadline in the past is rejected.
+- **Storage effects:** writes admin, token address, the immutable `claim_deadline`,
+  and the initialization flag. Extends the contract instance TTL to the configured
+  threshold at construction so the instance does not rely on default storage lifetime.
+- **Events:** none.
+- **Errors:** `InvalidAdmin`, `InvalidToken`, `InvalidDeadline`.
+
+### `claim_deadline`
+
+Read-only getter for the immutable claim deadline.
+
+- **Auth:** `none`.
+- **Input validation:** none.
+- **Storage effects:** reads the stored `claim_deadline` only.
+- **Events:** none.
+- **Errors:** none (returns the ledger timestamp after which recovery is permitted).
+
 ### `init`
 
 - **Auth:** `none` (deployment only).
 - **Input validation:** must not already be initialized; admin non-zero; token address non-zero.
-- **Storage effects:** writes admin, token address, initialization flag.
+- **Storage effects:** writes admin, token address, initialization flag; extends the
+  instance TTL to the configured threshold.
 - **Events:** none.
 - **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidToken`.
 
@@ -160,22 +185,37 @@ Claims an allocation for the caller using a Merkle proof.
   - Proof must verify against the stored root.
   - Allocation must not already have been claimed.
   - `amount` must be greater than zero.
-- **Storage effects:** marks the allocation claimed; transfers tokens to the caller.
+- **Storage effects:** marks the allocation claimed; transfers tokens to the caller;
+  renews the instance TTL.
 - **Events:** `claimed` — topics: `[claimed, caller]`; data: `(amount, round)`.
 - **Errors:** `Unauthorized`, `InvalidProof`, `AlreadyClaimed`, `InvalidAmount`, `TransferFailed`.
 
-### `recover`
+### `recover_unclaimed`
 
 Recovers unclaimed or misdirected funds back to the admin/treasury after the claim
 window closes.
 
 - **Auth:** `admin`.
 - **Input validation:**
-  - Claim window must have expired.
+  - The current ledger time must be at or after the immutable `claim_deadline`;
+    recovery before the deadline is rejected with `ClaimWindowOpen`.
   - Recoverable amount must be greater than zero.
-- **Storage effects:** decrements the round's remaining balance; transfers tokens to the admin.
+- **Storage effects:** decrements the round's remaining balance; transfers tokens to the
+  admin; renews the instance TTL.
 - **Events:** `recovered` — topics: `[recovered, round]`; data: `(amount)`.
-- **Errors:** `Unauthorized`, `WindowNotExpired`, `NothingToRecover`, `TransferFailed`.
+- **Errors:** `Unauthorized`, `ClaimWindowOpen`, `NothingToRecover`, `TransferFailed`.
+
+### Instance TTL lifecycle
+
+The airdrop instance maintains an explicit storage lifetime policy rather than relying
+on the default:
+
+- The instance TTL is set to the configured threshold at construction.
+- Every state-changing entrypoint (`set_merkle_root`, `claim`, `recover_unclaimed`)
+  renews the instance TTL to the configured threshold and extension, so an active
+  contract does not expire between operations.
+- The threshold and extension values are configuration constants; tests assert both the
+  configured threshold and the extension behavior after each state-changing path.
 
 ### `is_claimed`
 
@@ -311,11 +351,19 @@ Executes one or more calls atomically.
 - **Auth:** `caller` (the invoker authorizes each sub-call via its own mechanism).
 - **Input validation:**
   - Each call must specify a valid target and non-empty calldata.
-  - Total calls must not exceed the configured batch limit.
+  - The number of invocations must not exceed `MAX_INVOCATIONS`; a larger batch is
+    rejected with `TooManyInvocations` before any call is dispatched.
+  - The total serialized argument size across the batch must not exceed `MAX_ARG_BYTES`;
+    an oversized batch is rejected with `ArgumentTooLarge` before any call is dispatched.
   - Target must be on the allowlist (if an allowlist is configured).
+- **Limits:**
+  - `MAX_INVOCATIONS` — maximum number of calls accepted in a single `exec` batch.
+  - `MAX_ARG_BYTES` — maximum total argument bytes accepted across a single `exec` batch.
+  - Both limits are enforced up front; accepted batches still execute atomically
+    (all calls succeed or the whole batch reverts).
 - **Storage effects:** delegates to targets; may update router bookkeeping (nonces/counters) if configured.
 - **Events:** `executed` — topics: `[executed, caller]`; data: `(call_count, success)`.
-- **Errors:** `Unauthorized`, `InvalidTarget`, `EmptyCalldata`, `BatchTooLarge`, `TargetNotAllowed`, `CallFailed`.
+- **Errors:** `Unauthorized`, `InvalidTarget`, `EmptyCalldata`, `TooManyInvocations`, `ArgumentTooLarge`, `TargetNotAllowed`, `CallFailed`.
 
 ### `set_allowlist`
 

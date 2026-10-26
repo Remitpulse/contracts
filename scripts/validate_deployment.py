@@ -71,6 +71,12 @@ def validate(component, env):
         account_config(env["ACCOUNT_CONFIG"])
     if component == "airdrop":
         hex_bytes(env["ROOT_HASH"], 32, "ROOT_HASH")
+        try:
+            claim_deadline = int(env["CLAIM_DEADLINE"])
+        except (TypeError, ValueError) as error:
+            raise ValueError("CLAIM_DEADLINE must be a positive integer ledger sequence") from error
+        if claim_deadline <= 0:
+            raise ValueError("CLAIM_DEADLINE must be a positive integer ledger sequence")
     if component == "nft":
         try:
             supply = int(env["MAX_SUPPLY"])

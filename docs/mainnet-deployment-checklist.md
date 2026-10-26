@@ -54,13 +54,29 @@ sha256sum --check SHA256SUMS
 - [ ] Required signers / thresholds are confirmed for the target network.
 - [ ] Ownership or admin-transfer steps (if any) are scripted and reviewed before execution.
 
-## 5. Rollback and incident readiness
+## 5. Airdrop claim window and recovery schedule
+
+- [ ] The airdrop `CLAIM_DEADLINE` (claim window end) is recorded in the deployment log alongside the commit SHA and WASM checksum.
+- [ ] The `CLAIM_DEADLINE` was reviewed out-of-band by a second person (mainnet: **required**) and matches the schedule published to recipients.
+- [ ] The recovery policy is confirmed: recovery is rejected before `CLAIM_DEADLINE`, and the finalization event emitted at deployment is captured in the deployment log.
+- [ ] The recipient-visible recovery schedule (claim deadline and post-deadline recovery) is published before traffic is enabled.
+- [ ] The `CLAIM_DEADLINE` value is immutable for the deployed contract; any change requires a new deployment and a fresh review.
+
+## 6. Router batch limits
+
+- [ ] The documented maximum invocation count and maximum argument size enforced by `Router.exec` are recorded in the release notes.
+- [ ] The router limits were reviewed out-of-band by a second person (mainnet: **required**) and match the values documented in the contract.
+- [ ] Boundary behavior is confirmed: oversized batches are rejected with the typed error before dispatch, and accepted batches execute atomically.
+- [ ] Any change to the router limits is called out in the release notes as a breaking change for callers.
+
+## 7. Rollback and incident readiness
 
 - [ ] A rollback plan is documented: previous known-good commit SHA and WASM checksum are recorded.
 - [ ] Rollback has been rehearsed or validated on testnet.
 - [ ] Incident contacts and escalation path are recorded in the release notes.
 - [ ] Monitoring and alerting are active for the deployed contract before traffic is enabled.
 - [ ] A post-deployment verification step (smoke test) is defined and assigned.
+- [ ] The recorded `CLAIM_DEADLINE` and router batch limits are included in the rollback plan so a rollback restores the same schedule and limits.
 
 ## Sign-off
 

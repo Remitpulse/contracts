@@ -40,6 +40,7 @@ if sys.argv[1:3] == ['contract', 'deploy']:
                    "RUSTUP_TOOLCHAIN": toolchain,
                    "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
                    "TOKEN": "asset", "FUNDER": "funder", "OWNER": "owner",
+                   "CLAIM_DEADLINE": "2000000000",
                    "MAX_SUPPLY": "10", "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
             env.update(overrides or {})
             if missing:
@@ -117,7 +118,8 @@ if sys.argv[1:3] == ['contract', 'deploy']:
             self.assertEqual(calls, [])
 
     def test_optional_contract_constructors(self):
-        for component, arguments in [("airdrop", ["--root_hash", "--token", "--admin", "--funder"]),
+        for component, arguments in [("airdrop", ["--root_hash", "--token", "--admin", "--funder",
+                                                  "--claim_deadline"]),
                                      ("nft", ["--owner", "--max_supply", "--metadata"])]:
             result, calls, _ = self.run_deploy(component=component)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -195,6 +197,7 @@ if sys.argv[1:3] == ['contract', 'build']:
             ("airdrop", "ROOT_HASH"),
             ("airdrop", "TOKEN"),
             ("airdrop", "FUNDER"),
+            ("airdrop", "CLAIM_DEADLINE"),
             ("nft", "SOURCE_ACCOUNT"),
             ("nft", "OWNER"),
             ("nft", "MAX_SUPPLY"),
@@ -241,6 +244,7 @@ if sys.argv[1:3] == ['contract', 'build']:
             {"ACCOUNT_CONFIG": "not json"},
             {"ACCOUNT_CONFIG": json.dumps({**CONFIG, "threshold": 0})},
             {"ROOT_HASH": "bad"},
+            {"CLAIM_DEADLINE": "not-a-number"},
             {"MAX_SUPPLY": "-1"},
             {"MAX_SUPPLY": "not-a-number"},
             {"METADATA": "{}"},

@@ -8,7 +8,7 @@ use soroban_sdk::{
 use stellar_default_impl_macro::default_impl;
 use stellar_fungible::{Base, FungibleToken};
 
-use crate::{Router, RouterClient};
+use crate::{Router, RouterClient, MAX_ARG_BYTES, MAX_INVOCATIONS};
 
 #[contract]
 pub struct TokenContract;
@@ -198,4 +198,123 @@ fn test_exec_atomicity() {
 
     assert_eq!(token_a_client.balance(&caller), 100);
     assert_eq!(token_a_client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_exec_max_invocations_succeeds() {
+    let e = Env::default();
+    e.mock_all_auths_allowing_non_root_auth();
+
+    let token = Address::generate(&e);
+    let token_client = create_token_contract(&e, &token);
+
+    let caller = Address::generate(&e);
+    let recipient = Address::generate(&e);
+
+    token_client.mint(&caller, &(MAX_INVOCATIONS as i128));
+
+    let contract_id = e.register(Router, ());
+    let client = RouterClient::new(&e, &contract_id);
+
+    let mut invocations: soroban_sdk::Vec<(
+        Address,
+        soroban_sdk::Symbol,
+        soroban_sdk::Vec<Val>,
+    )> = vec![&e];
+    for _ in 0..MAX_INVOCATIONS {
+        invocations.push_back((
+            token_client.address.clone(),
+            symbol_short!("transfer"),
+            (caller.clone(), recipient.clone(), 1_i128).into_val(&e),
+        ));
+    }
+
+    let results = client.exec(&caller, &invocations);
+    assert_eq!(results.len(), MAX_INVOCATIONS);
+
+    assert_eq!(token_client.balance(&caller), 0);
+    assert_eq!(token_client.balance(&recipient), MAX_INVOCATIONS as i128);
+}
+
+#[test]
+fn test_exec_too_many_invocations() {
+    let e = Env::default();
+    e.mock_all_auths_allowing_non_root_auth();
+
+    let token = Address::generate(&e);
+    let token_client = create_token_contract(&e, &token);
+
+    let caller = Address::generate(&e);
+    let recipient = Address::generate(&e);
+
+    token_client.mint(&caller, &((MAX_INVOCATIONS + 1) as i128));
+
+    let contract_id = e.register(Router, ());
+    let client = RouterClient::new(&e, &contract_id);
+
+    let mut invocations: soroban_sdk::Vec<(
+        Address,
+        soroban_sdk::Symbol,
+        soroban_sdk::Vec<Val>,
+    )> = vec![&e];
+    for _ in 0..(MAX_INVOCATIONS + 1) {
+        invocations.push_back((
+            token_client.address.clone(),
+            symbol_short!("transfer"),
+            (caller.clone(), recipient.clone(), 1_i128).into_val(&e),
+        ));
+    }
+
+    let result = client.try_exec(&caller, &invocations);
+    assert_eq!(result, Err(Ok(crate::RouterError::TooManyInvocations)));
+
+    // No dispatch should have occurred.
+    assert_eq!(token_client.balance(&caller), (MAX_INVOCATIONS + 1) as i128);
+    assert_eq!(token_client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_exec_argument_too_large() {
+    let e = Env::default();
+    e.mock_all_auths_allowing_non_root_auth();
+
+    let token = Address::generate(&e);
+    let token_client = create_token_contract(&e, &token);
+
+    let caller = Address::generate(&e);
+    let recipient = Address::generate(&e);
+
+    token_client.mint(&caller, &100);
+
+    let contract_id = e.register(Router, ());
+    let client = RouterClient::new(&e, &contract_id);
+
+    // Build an argument payload whose encoded size exceeds MAX_ARG_BYTES.
+    let big = soroban_sdk::Bytes::from_array(&e, &[0u8; 1]);
+    let mut big_bytes = soroban_sdk::Bytes::new(&e);
+    // Each byte contributes at least one byte to the encoded size; pad well past the limit.
+    for _ in 0..(MAX_ARG_BYTES + 1) {
+        big_bytes.extend_from_array(&[0u8]);
+    }
+    let _ = big;
+
+    let invocations: soroban_sdk::Vec<(
+        Address,
+        soroban_sdk::Symbol,
+        soroban_sdk::Vec<Val>,
+    )> = vec![
+        &e,
+        (
+            token_client.address.clone(),
+            symbol_short!("transfer"),
+            vec![&e, big_bytes.into_val(&e)],
+        ),
+    ];
+
+    let result = client.try_exec(&caller, &invocations);
+    assert_eq!(result, Err(Ok(crate::RouterError::ArgumentTooLarge)));
+
+    // No dispatch should have occurred.
+    assert_eq!(token_client.balance(&caller), 100);
+    assert_eq!(token_client.balance(&recipient), 0);
 }

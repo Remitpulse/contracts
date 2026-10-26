@@ -4,7 +4,7 @@
 
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
     token::{self, TokenClient},
     Address, BytesN, Env, Vec,
 };
@@ -24,11 +24,14 @@ enum DataKey {
     TokenAddress,
     Admin,
     Funder,
+    ClaimDeadline,
 }
 
 #[contracterror]
 enum AirdropError {
     Ended = 1000,
+    ClaimWindowOpen = 1001,
+    InvalidClaimDeadline = 1002,
 }
 
 #[contracttype]
@@ -50,7 +53,14 @@ pub struct AirdropContract;
 #[contractimpl]
 impl AirdropContract {
     /// Initializes the contract with the root hash of the Merkle tree, the token address,
-    /// the funding amount, and the funding source address.
+    /// the admin, the funder, and the claim deadline.
+    ///
+    /// # Claim window and recovery policy:
+    /// Recipients may claim until the immutable `claim_deadline` ledger sequence. The admin
+    /// cannot recover unclaimed tokens before that deadline; `recover_unclaimed` panics with
+    /// `ClaimWindowOpen` while the claim window is still open. Once the deadline has passed,
+    /// the admin may recover the remaining balance to the `funder` address, which permanently
+    /// ends the airdrop and emits a `recovered` event.
     ///
     /// # Arguments:
     /// * `e` - The Soroban environment.
@@ -58,20 +68,45 @@ impl AirdropContract {
     /// * `token` - The address of the token to be distributed.
     /// * `admin` - The address of the admin who will manage the airdrop.
     /// * `funder` - The address where the `recover_unclaimed` function deposits the remaining balance.
+    /// * `claim_deadline` - The ledger sequence after which recovery becomes possible. Must be
+    ///   strictly greater than the current ledger sequence.
     pub fn __constructor(
         e: Env,
         root_hash: BytesN<32>,
         token: Address,
         admin: Address,
         funder: Address,
+        claim_deadline: u32,
     ) {
+        if claim_deadline <= e.ledger().sequence() {
+            panic_with_error!(&e, AirdropError::InvalidClaimDeadline);
+        }
+
         Distributor::set_root(&e, root_hash);
         e.storage().instance().set(&DataKey::Ended, &false);
         e.storage().instance().set(&DataKey::TokenAddress, &token);
         e.storage().instance().set(&DataKey::Admin, &admin);
         e.storage().instance().set(&DataKey::Funder, &funder);
+        e.storage()
+            .instance()
+            .set(&DataKey::ClaimDeadline, &claim_deadline);
+
+        e.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_EXTEND_AMOUNT);
 
         admin.require_auth();
+    }
+
+    /// Returns the immutable ledger sequence at which the claim window closes.
+    ///
+    /// # Arguments:
+    /// * `e` - The Soroban environment.
+    pub fn claim_deadline(e: &Env) -> u32 {
+        e.storage()
+            .instance()
+            .get::<_, u32>(&DataKey::ClaimDeadline)
+            .unwrap()
     }
 
     /// Returns whether the airdrop has ended.
@@ -126,11 +161,18 @@ impl AirdropContract {
 
     /// Recovers any unclaimed tokens from the contract back to the funder and disables further claims.
     ///
+    /// Recovery is only permitted after the immutable claim deadline has passed; calling this
+    /// before the deadline panics with `ClaimWindowOpen`.
+    ///
     /// # Arguments:
     /// * `e` - The Soroban environment.
     pub fn recover_unclaimed(e: &Env) {
         if Self::is_ended(e) {
             panic_with_error!(e, AirdropError::Ended);
+        }
+
+        if e.ledger().sequence() < Self::claim_deadline(e) {
+            panic_with_error!(e, AirdropError::ClaimWindowOpen);
         }
 
         let admin = e
@@ -152,6 +194,13 @@ impl AirdropContract {
         if remaining > 0 {
             token_client.transfer(&e.current_contract_address(), &funder, &remaining);
         }
+
+        e.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_EXTEND_AMOUNT);
+
+        e.events()
+            .publish((symbol_short!("recovered"), admin), (funder, remaining));
     }
 
     fn token_client(e: &Env) -> TokenClient<'_> {
