@@ -13,7 +13,10 @@ fn reimburses_once_and_requires_admin() {
     let id = BytesN::from_array(&e, &[1; 32]);
     client.reimburse(&id, &asset, &recipient, &10);
     assert_eq!(token::Client::new(&e, &asset).balance(&recipient), 10);
-    assert!(client.try_reimburse(&id, &asset, &recipient, &10).is_err());
+    assert_eq!(
+        client.try_reimburse(&id, &asset, &recipient, &10),
+        Err(Ok(Error::AlreadyReimbursed))
+    );
     e.set_auths(&[]);
     assert!(client
         .try_reimburse(&BytesN::from_array(&e, &[2; 32]), &asset, &recipient, &10)
@@ -37,7 +40,10 @@ fn failed_transfer_rolls_back_reimbursement_and_can_be_retried() {
         client.try_reimburse(&id, &asset, &recipient, &0),
         Err(Ok(Error::InvalidAmount))
     );
-    assert!(client.try_reimburse(&id, &asset, &recipient, &10).is_err());
+    assert_eq!(
+        client.try_reimburse(&id, &asset, &recipient, &10),
+        Err(Ok(Error::InsufficientBalance))
+    );
     assert!(!client.is_reimbursed(&id));
     token::StellarAssetClient::new(&e, &asset).mint(&vault, &10);
     client.reimburse(&id, &asset, &recipient, &10);

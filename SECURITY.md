@@ -1,6 +1,8 @@
 # Security policy
 
-Report a suspected vulnerability privately to the RemitPulse security contact.
+Report a suspected vulnerability privately using [GitHub private security
+advisories](https://github.com/Remitpulse/contracts/security/advisories/new) or
+the RemitPulse security contact.
 Do not open a public issue with exploit steps, keys, transaction payloads, or
 an affected contract ID. Include the network, contract ID and WASM hash, a
 minimal reproduction, impact, and suggested mitigations. Acknowledgment and

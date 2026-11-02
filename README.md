@@ -219,6 +219,7 @@ Create and fund a CLI identity on testnet:
 stellar keys generate remitpulse-deployer --network testnet --fund
 export SOURCE_ACCOUNT=remitpulse-deployer
 export ADMIN="$(stellar keys address remitpulse-deployer)"
+export STELLAR_NETWORK_PASSPHRASE='Test SDF Network ; September 2015'
 ```
 
 Set `ACCOUNT_CONFIG` to JSON with real registered passkey material. Hex strings
@@ -229,7 +230,9 @@ Do not deploy with placeholder keys; there is no recovery path in this version.
 ```sh
 export ACCOUNT_CONFIG='{"keys":["<SEC1_PUBLIC_KEY_HEX>"],"threshold":1,"rp_id_hash":"<SHA256_RP_ID_HEX>","origin":"<ORIGIN_UTF8_HEX>"}'
 ./deploy.sh testnet core
-# For a funded mainnet identity with the same environment inputs configured:
+# Mainnet is intentionally blocked unless both values are set exactly:
+export STELLAR_NETWORK_PASSPHRASE='Public Global Stellar Network ; September 2015'
+export REMITPULSE_ALLOW_MAINNET=yes
 ./deploy.sh mainnet core
 ```
 
@@ -248,7 +251,10 @@ operators can track the active epoch.
 and admin assignment happen atomically through constructors. A separate verifier
 deployment is optional: account calls the same verifier code internally.
 The script validates required variables, builds/optimizes before submitting,
-stops on failures and records each successful ID in `deployments/<network>-*.env`.
+stops on failures and records each successful ID plus network, component and UTC
+timestamp in a gitignored deployment manifest at `deployments/<network>-*.env`.
+It requires the canonical passphrase for the selected network; Mainnet also requires
+`REMITPULSE_ALLOW_MAINNET=yes` for every invocation.
 Deployments are separate transactions; earlier deployments remain if a later one
 fails. No network deployments are performed by tests or CI.
 
@@ -328,3 +334,10 @@ Documentation review is part of the pull-request expectations: changes that
 touch contract entrypoints, events or errors must update
 [`docs/INTERFACES.md`](docs/INTERFACES.md), and release-affecting changes must
 confirm the [mainnet checklist](docs/MAINNET_CHECKLIST.md) where applicable.
+
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md) and [security model](docs/SECURITY_MODEL.md)
+- [Deployment guide](docs/DEPLOYMENT.md) and [testing guide](docs/TESTING.md)
+- [Source-review audit](docs/CONTRACT_AUDIT.md) and [upstream attribution](docs/ORIGINAL_CONTRIBUTIONS.md)
+- [Security reporting policy](SECURITY.md), [contribution guide](CONTRIBUTING.md), and [changelog](CHANGELOG.md)

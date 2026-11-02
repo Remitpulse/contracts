@@ -35,6 +35,7 @@ audit:
 	cargo audit --file Cargo.lock
 check:
 	cargo fmt --all -- --check
+	cargo clippy --workspace --locked -- -D warnings
 	cargo test --workspace --locked
 	$(MAKE) lint
 	$(MAKE) ci-clippy

@@ -15,6 +15,7 @@ enum Key {
 pub enum Error {
     InvalidAmount = 1,
     AlreadyReimbursed = 2,
+    InsufficientBalance = 3,
 }
 #[contract]
 pub struct Subsidy;
@@ -64,6 +65,11 @@ impl Subsidy {
         let epoch = Self::active_epoch(e.clone());
         if e.storage().instance().has(&Key::Used(epoch, id.clone())) {
             return Err(Error::AlreadyReimbursed);
+        }
+        // Return a stable contract error rather than relying on the token
+        // implementation's failure when the vault is underfunded.
+        if token::Client::new(&e, &asset).balance(&e.current_contract_address()) < amount {
+            return Err(Error::InsufficientBalance);
         }
         e.storage().instance().set(&Key::Used(epoch, id.clone()), &true);
         token::Client::new(&e, &asset).transfer(&e.current_contract_address(), &recipient, &amount);

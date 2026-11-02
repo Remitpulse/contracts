@@ -8,6 +8,19 @@ network=${1:-testnet}
 component=${2:-core}
 case "$network" in testnet|mainnet) ;; *) echo "Network must be testnet or mainnet (got '$network')" >&2; exit 2;; esac
 case "$component" in core|router|webauthn|account|subsidy|airdrop|nft) ;; *) echo "Unknown component '$component' (expected one of: core, router, webauthn, account, subsidy, airdrop, nft)" >&2; exit 2;; esac
+case "$network" in
+  testnet) expected_passphrase='Test SDF Network ; September 2015';;
+  mainnet) expected_passphrase='Public Global Stellar Network ; September 2015';;
+esac
+: "${STELLAR_NETWORK_PASSPHRASE:?Set the expected Stellar network passphrase}"
+if [[ "$STELLAR_NETWORK_PASSPHRASE" != "$expected_passphrase" ]]; then
+  echo "STELLAR_NETWORK_PASSPHRASE does not match $network" >&2
+  exit 2
+fi
+if [[ "$network" == mainnet && "${REMITPULSE_ALLOW_MAINNET:-}" != yes ]]; then
+  echo 'Mainnet deployment requires REMITPULSE_ALLOW_MAINNET=yes' >&2
+  exit 2
+fi
 : "${SOURCE_ACCOUNT:?Set SOURCE_ACCOUNT to a funded CLI identity}"
 CLI=${STELLAR_CLI:-stellar} # Set to soroban for the legacy soroban-cli binary.
 command -v "$CLI" >/dev/null
@@ -38,6 +51,8 @@ fi
 mkdir -p deployments
 record="deployments/${network}-$(date -u +%Y%m%dT%H%M%SZ)-$$.env"
 : > "$record"
+printf 'REMITPULSE_NETWORK=%s\nREMITPULSE_NETWORK_PASSPHRASE=%s\nREMITPULSE_COMPONENT=%s\nREMITPULSE_DEPLOYED_AT=%s\n' \
+  "$network" "$STELLAR_NETWORK_PASSPHRASE" "$component" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$record"
 deploy() {
   local name=$1 id wasm
   shift

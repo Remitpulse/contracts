@@ -87,3 +87,8 @@ should confirm the reference matches the source before approving.
   [`docs/mainnet-deployment-checklist.md`](docs/mainnet-deployment-checklist.md).
   Release and change-review discussions for production deployments should
   reference this checklist.
+
+Do not include seed phrases, private keys, funded-account files, or deployment
+manifests in commits. Preserve source headers and upstream attribution in the
+router and airdrop components. Contract interface or authorization changes need
+explicit migration and security-model discussion in the pull request.

@@ -36,12 +36,17 @@ if sys.argv[1:3] == ['contract', 'deploy']:
             cli.chmod(0o755)
             env = {**os.environ, "STELLAR_CLI": str(cli), "CLI_LOG": str(tmp / "calls"),
                    "SOURCE_ACCOUNT": "deployer", "ADMIN": "admin",
+                   "STELLAR_NETWORK_PASSPHRASE": ("Public Global Stellar Network ; September 2015"
+                                                  if network == "mainnet"
+                                                  else "Test SDF Network ; September 2015"),
                    "BUILD_TOOLCHAIN_LOG": str(tmp / "toolchain"),
                    "RUSTUP_TOOLCHAIN": toolchain,
                    "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
                    "TOKEN": "asset", "FUNDER": "funder", "OWNER": "owner",
                    "CLAIM_DEADLINE": "2000000000",
                    "MAX_SUPPLY": "10", "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
+            if network == "mainnet":
+                env["REMITPULSE_ALLOW_MAINNET"] = "yes"
             env.update(overrides or {})
             if missing:
                 env.pop(missing, None)
@@ -96,6 +101,14 @@ if sys.argv[1:3] == ['contract', 'deploy']:
         self.assertEqual(calls, [["contract", "build"]])
         result, calls, _ = self.run_deploy(network="unknown")
         self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+
+    def test_network_binding_and_mainnet_opt_in_never_reach_build(self):
+        result, calls, _ = self.run_deploy(overrides={"STELLAR_NETWORK_PASSPHRASE": "wrong"})
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(calls, [])
+        result, calls, _ = self.run_deploy("mainnet", overrides={"REMITPULSE_ALLOW_MAINNET": "no"})
+        self.assertEqual(result.returncode, 2)
         self.assertEqual(calls, [])
 
     def test_invalid_constructor_configuration_never_builds_or_deploys(self):
