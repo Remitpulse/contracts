@@ -53,7 +53,8 @@ expiry date alongside the configuration so it can be reviewed and removed.
 
 ## Branch protection policy for `main`
 
-The `main` branch is protected. The following policy applies to all changes:
+GitHub reported `main` as unprotected on 2026-11-05. The intended policy below
+must be enabled in repository settings before maintainers claim enforcement:
 
 - **Pull requests are required.** All changes to `main` must land through a
   pull request; direct pushes to `main` are not permitted.

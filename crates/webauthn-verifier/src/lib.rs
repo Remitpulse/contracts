@@ -90,9 +90,6 @@ pub fn verify_assertion(
     );
     let mut signed = assertion.authenticator_data.clone();
     signed.append(&Bytes::from(e.crypto().sha256(&assertion.client_data_json)));
-    e.crypto().secp256r1_verify(
-        key,
-        &e.crypto().sha256(&signed).into(),
-        &assertion.signature,
-    );
+    e.crypto()
+        .secp256r1_verify(key, &e.crypto().sha256(&signed), &assertion.signature);
 }

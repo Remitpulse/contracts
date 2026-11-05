@@ -43,9 +43,7 @@ mod test {
         auth.push_back(flags);
         auth.append(&Bytes::from_slice(e, &[0; 4]));
         let json = std::format!(
-            r#"{{"type":"webauthn.get","challenge":"{}","origin":"{}","crossOrigin":false}}"#,
-            challenge,
-            origin
+            r#"{{"type":"webauthn.get","challenge":"{challenge}","origin":"{origin}","crossOrigin":false}}"#
         );
         let json = Bytes::from_slice(e, json.as_bytes());
         let mut data = auth.clone();
@@ -110,5 +108,45 @@ mod test {
         );
         a.signature = BytesN::from_array(&e, &[0; 64]);
         assert!(client.try_verify(&key, &rp, &origin, &payload, &a).is_err());
+    }
+    #[test]
+    fn rejects_ambiguous_client_json_and_wrong_rp() {
+        let e = Env::default();
+        let id = e.register(WebAuthn, ());
+        let client = WebAuthnClient::new(&e, &id);
+        let origin = Bytes::from_slice(&e, b"https://remitpulse.example");
+        let (key, rp, payload, assertion) = fixture(
+            &e,
+            5,
+            "https://remitpulse.example",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        assert!(client
+            .try_verify(
+                &key,
+                &BytesN::from_array(&e, &[0; 32]),
+                &origin,
+                &payload,
+                &assertion
+            )
+            .is_err());
+        for json in [
+            r#"{"type":"webauthn.get","type":"webauthn.create","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","origin":"https://remitpulse.example"}"#,
+            r#"{"type":"webauthn.get","challenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","origin":"https://remitpulse.example","crossOrigin":true}"#,
+        ] {
+            let mut a = assertion.clone();
+            a.client_data_json = Bytes::from_slice(&e, json.as_bytes());
+            // Re-sign malformed client data so failure cannot be explained by a stale signature.
+            let mut signed = a.authenticator_data.clone();
+            signed.append(&Bytes::from(e.crypto().sha256(&a.client_data_json)));
+            let mut raw = std::vec![0; signed.len() as usize];
+            signed.copy_into_slice(&mut raw);
+            let sig: Signature = SigningKey::from_bytes((&[3; 32]).into())
+                .unwrap()
+                .sign(&raw);
+            a.signature =
+                BytesN::from_array(&e, &sig.normalize_s().unwrap_or(sig).to_bytes().into());
+            assert!(client.try_verify(&key, &rp, &origin, &payload, &a).is_err());
+        }
     }
 }

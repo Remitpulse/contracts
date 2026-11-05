@@ -1,8 +1,11 @@
 """Deployment orchestration tests. The CLI is stubbed; no RPC is contacted."""
+import base64
+import sys
 import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import tomllib
 import unittest
@@ -10,13 +13,40 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_KEY = ("04" + "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
               + "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
-CONFIG = {"keys": [PUBLIC_KEY], "threshold": 1, "rp_id_hash": "00" * 32,
+CONFIG = {"keys": [PUBLIC_KEY], "threshold": 1, "rp_id_hash": "01" * 32,
           "origin": "https://remitpulse.example".encode().hex()}
 CONFIG_JSON = json.dumps(CONFIG)
+sys.path.insert(0, str(ROOT / "scripts"))
+from validate_deployment import crc16_xmodem
+
+def address(version):
+    body = bytes([version]) + bytes(32)
+    return base64.b32encode(body + crc16_xmodem(body).to_bytes(2, "little")).decode()
+
+ACCOUNT = address(6 << 3)
+TOKEN = address(2 << 3)
 
 
 
 class DeploymentTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Run the copied deployment tooling in isolation: CLI stubs must never
+        # overwrite real release WASM or reuse artifacts from a prior cargo build.
+        global ROOT
+        cls.source_root = ROOT
+        cls.directory = tempfile.TemporaryDirectory()
+        ROOT = Path(cls.directory.name)
+        for name in ("deploy.sh", "rust-toolchain.toml", "Makefile"):
+            shutil.copy2(cls.source_root / name, ROOT / name)
+        shutil.copytree(cls.source_root / "scripts", ROOT / "scripts")
+
+    @classmethod
+    def tearDownClass(cls):
+        global ROOT
+        ROOT = cls.source_root
+        cls.directory.cleanup()
+
     def run_deploy(self, network="testnet", component="core", missing=None, fail=False, toolchain="stable", overrides=None):
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
@@ -26,6 +56,8 @@ import json, os, sys
 with open(os.environ['CLI_LOG'], 'a') as f:
     f.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1:3] == ['contract', 'build']:
+    os.makedirs('target/wasm32v1-none/release', exist_ok=True)
+    open('target/wasm32v1-none/release/remitpulse_account.wasm', 'wb').write(b'\\0asm')
     with open(os.environ['BUILD_TOOLCHAIN_LOG'], 'w') as f:
         f.write(os.environ.get('RUSTUP_TOOLCHAIN', ''))
 if os.environ.get('FAIL_BUILD') and sys.argv[1:3] == ['contract', 'build']:
@@ -42,7 +74,7 @@ if sys.argv[1:3] == ['contract', 'deploy']:
                    "BUILD_TOOLCHAIN_LOG": str(tmp / "toolchain"),
                    "RUSTUP_TOOLCHAIN": toolchain,
                    "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
-                   "TOKEN": "asset", "FUNDER": "funder", "OWNER": "owner",
+                   "TOKEN": TOKEN, "FUNDER": "funder", "OWNER": "owner",
                    "CLAIM_DEADLINE": "2000000000",
                    "MAX_SUPPLY": "10", "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
             if network == "mainnet":
@@ -70,7 +102,7 @@ if sys.argv[1:3] == ['contract', 'deploy']:
         with tempfile.TemporaryDirectory() as directory:
             tmp = Path(directory)
             cli = tmp / "stellar"
-            cli.write_text("#!/bin/sh\nprintf '%s' \"$RUSTUP_TOOLCHAIN\" > \"$BUILD_TOOLCHAIN_LOG\"\n")
+            cli.write_text("#!/bin/sh\nmkdir -p target/wasm32v1-none/release\nprintf x > target/wasm32v1-none/release/remitpulse_account.wasm\nprintf '%s' \"$RUSTUP_TOOLCHAIN\" > \"$BUILD_TOOLCHAIN_LOG\"\n")
             cli.chmod(0o755)
             for inherited in ("stable", "1.85.0"):
                 env = {**os.environ, "STELLAR_CLI": str(cli), "RUSTUP_TOOLCHAIN": inherited,
@@ -265,14 +297,19 @@ if sys.argv[1:3] == ['contract', 'build']:
         ]
         for overrides in cases:
             with self.subTest(overrides=overrides):
+                component = ("account" if "ACCOUNT_CONFIG" in overrides else
+                             "airdrop" if set(overrides) & {"ROOT_HASH", "CLAIM_DEADLINE"} else "nft")
                 env = {**os.environ, "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
+                       "SOURCE_ACCOUNT": "deployer", "ADMIN": "admin", "FUNDER": "funder",
+                       "TOKEN": TOKEN, "OWNER": "owner", "CLAIM_DEADLINE": "100",
                        "MAX_SUPPLY": "10",
                        "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
                 env.update(overrides)
-                result = subprocess.run([str(ROOT / "scripts/validate_deployment.py")],
+                result = subprocess.run([sys.executable, str(ROOT / "scripts/validate_deployment.py"), component],
                                         env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("Deployment configuration invalid", result.stderr)
+                self.assertNotIn("missing", result.stderr)
 
     def test_invalid_addresses_never_build_or_deploy(self):
         # Malformed strkeys and identities must be rejected before any CLI call.
@@ -289,37 +326,45 @@ if sys.argv[1:3] == ['contract', 'build']:
             "S" + "A" * 55,          # secret key form is not accepted
             "not a valid identity!",
         ]
-        for variable in ("SOURCE_ACCOUNT", "ADMIN", "TOKEN", "FUNDER", "OWNER"):
+        for variable, component in [("SOURCE_ACCOUNT", "core"), ("ADMIN", "subsidy"), ("TOKEN", "airdrop"), ("FUNDER", "airdrop"), ("OWNER", "nft")]:
             for value in bad_addresses:
                 with self.subTest(variable=variable, value=value):
-                    result, calls, records = self.run_deploy(overrides={variable: value})
-                    self.assertEqual(result.returncode, 2, result.stderr)
-                    self.assertIn("Deployment configuration invalid", result.stderr)
+                    result, calls, records = self.run_deploy(component=component, overrides={variable: value})
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(variable, result.stderr)
                     self.assertEqual(calls, [])
                     self.assertEqual(records, [])
 
     def test_valid_addresses_are_accepted(self):
         # Well-formed G/C strkeys and plain identity names must pass validation.
-        valid_addresses = [
-            "deployer",
-            "admin",
-            "funder",
-            "owner",
-            "G" + "A" * 55,
-            "C" + "A" * 55,
-        ]
-        for variable in ("SOURCE_ACCOUNT", "ADMIN", "TOKEN", "FUNDER", "OWNER"):
-            for value in valid_addresses:
+        for variable, component, values in [
+            ("SOURCE_ACCOUNT", "core", ["deployer", ACCOUNT]),
+            ("ADMIN", "subsidy", ["admin", ACCOUNT, TOKEN]),
+            ("TOKEN", "airdrop", [TOKEN]),
+            ("FUNDER", "airdrop", ["funder", ACCOUNT, TOKEN]),
+            ("OWNER", "nft", ["owner", ACCOUNT, TOKEN]),
+        ]:
+            for value in values:
                 with self.subTest(variable=variable, value=value):
-                    env = {**os.environ, "ACCOUNT_CONFIG": CONFIG_JSON, "ROOT_HASH": "00" * 32,
-                           "MAX_SUPPLY": "10",
-                           "METADATA": '{"base_uri":"ipfs://remitpulse/", "name":"RemitPulse", "symbol":"RP"}'}
-                    env.update({"SOURCE_ACCOUNT": "deployer", "ADMIN": "admin",
-                                "TOKEN": "asset", "FUNDER": "funder", "OWNER": "owner"})
-                    env[variable] = value
-                    result = subprocess.run([str(ROOT / "scripts/validate_deployment.py")],
-                                            env=env, text=True, capture_output=True)
+                    result, _, _ = self.run_deploy(component=component, overrides={variable: value})
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_core_does_not_require_optional_airdrop_inputs(self):
+        for variable in ("TOKEN", "FUNDER", "CLAIM_DEADLINE"):
+            result, _, _ = self.run_deploy(missing=variable)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_account_preflight_matches_on_chain_bounds(self):
+        for patch in ({"rp_id_hash": "00" * 32}, {"origin": ("https://" + "a" * 250).encode().hex()}):
+            result, calls, _ = self.run_deploy(overrides={"ACCOUNT_CONFIG": json.dumps({**CONFIG, **patch})})
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(calls, [])
+
+    def test_deadline_must_fit_u32(self):
+        result, calls, _ = self.run_deploy(component="airdrop", overrides={"CLAIM_DEADLINE": str(2**32)})
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(calls, [])
+
 
 
 if __name__ == "__main__":

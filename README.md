@@ -1,8 +1,16 @@
 # remitpulse-contracts
 
 Rust/Soroban contracts for RemitPulse, a passkey-powered Stellar remittance app.
+
+**Integration/release status:** the dependency audit currently fails on
+RUSTSEC-2026-0387 (no suppression); current frontend and backend main branches do not
+match the account/subsidy ABI. Router upstream licensing remains unresolved.
+No reviewed Testnet transaction/WASM-hash evidence is committed. See
+[readiness review](docs/READINESS_REVIEW.md) for exact revisions, test results,
+security findings and release blockers. This is a maintainer source review,
+not an independent security audit.
 This repository contains a Cargo workspace; each contract has its own `Cargo.toml`
-and `src/`. SDK 22.0.8, OpenZeppelin v0.3.0 and Rust 1.88.0 are pinned for
+and `src/`. SDK 22.0.11, OpenZeppelin v0.3.0 and Rust 1.88.0 are pinned for
 compatibility. Cargo.lock must be committed.
 
 | Crate | Purpose |
@@ -19,7 +27,7 @@ does not export the standalone verifier endpoint.
 
 ## Build and test
 
-Install Rust using rustup, then a Stellar CLI with Protocol 22 support (the
+Install Rust using rustup, then a Stellar CLI supporting SDK 22 contract artifacts and `wasm32v1-none` (the
 successor to `soroban-cli`). The toolchain file installs the required Rust target.
 Deployment-script tests require Python 3.11 or later.
 
@@ -53,9 +61,8 @@ comment explaining why the lint cannot be satisfied. Blanket crate-level allows
 are not accepted. ShellCheck covers `deploy.sh` and `scripts/build.sh`; any
 suppression is scoped to a single line with an inline `# shellcheck disable=...`
 comment and a short justification. `cargo audit` reads `Cargo.lock` and fails on
-known advisories; install it with `cargo install cargo-audit --locked`. If an
-advisory must be deferred, add a time-bounded entry to `audit.toml` with an
-expiry and rationale, and remove it once the dependency is updated. CI runs all
+known advisories; install it with `cargo install cargo-audit --version 0.22.2 --locked`. No advisory exceptions are configured. Any future exception requires the
+justification and automated expiry enforcement described in SECURITY.md. CI runs all
 of these checks on every push and pull request.
 
 `make build` and `deploy.sh` use `scripts/build.sh`, which explicitly selects the
@@ -64,14 +71,14 @@ This also handles shells or CI jobs with `RUSTUP_TOOLCHAIN=stable`, which would
 otherwise override the repository's pin. The Stellar CLI itself may be installed
 using a newer compiler; contract compilation still uses the pinned toolchain.
 
-The initial compiler incompatibilities are resolved by Rust **1.88.0**:
-
-- Rust 1.99.1 rejects `ethnum` 1.5.2's integer-error transmute because the standard
-  library's `TryFromIntError` representation changed.
-- Rust 1.85.0 cannot compile OpenZeppelin v0.3.0's `is_multiple_of` call, which was
-  not yet stable in that toolchain.
-- Rust 1.88.0 supports the locked dependencies and passes the native test suite
-  and release WASM builds. Keep the toolchain pin and `Cargo.lock` together.
+The workspace and CI use Rust **1.88.0**, including rustfmt and Clippy.
+OpenZeppelin v0.3.0 requires SDK 22.x and uses `is_multiple_of`, stabilized in
+Rust 1.87. Keep SDK 22.0.11, the toolchain pin and the lockfile together.
+The previously merged SDK 25.3.1 update created two incompatible SDK type graphs;
+this review restores the compatible SDK 22 line. This is not a migration to the
+latest Stellar protocol SDK. A major migration must update OpenZeppelin and
+validate contract interfaces together. Test dependencies use p256 0.13.2 and
+Ed25519 Dalek 2.2; the SDK host's broad Dalek requirement is also locked to 2.2.
 
 For a manual build outside the wrapper, clear an inherited override with
 `env -u RUSTUP_TOOLCHAIN cargo build --workspace --locked --release --target wasm32v1-none`.
@@ -92,7 +99,7 @@ The deployment script supports `STELLAR_CLI=soroban` for such legacy releases.
 [Stellar build/deploy documentation](https://developers.stellar.org/docs/build/smart-contracts/getting-started/hello-world).
 
 Tests use the built-in Soroban test SDK. The extracted contracts retain their
-original unit/integration suites. New tests cover session limits, expiry,
+adapted unit/integration suites. New tests cover session limits, expiry,
 revocation, token scope, real signed custom-account authorization, SAC transfers,
 replay protection, and subsidy authorization. Deployment script tests stub the CLI to verify constructor arguments, network selection,
 preflight validation and build failure handling. No RPC or funded account is needed.
@@ -110,7 +117,7 @@ workflow run for the reviewed commit. Artifacts are named
 `remitpulse-contracts-<commit-sha>-<build-target>`, where `<commit-sha>` is the
 full 40-character commit SHA and `<build-target>` is the build target (for
 example `wasm32v1-none`). Each artifact contains the `remitpulse_*.wasm` files
-and a `SHA256SUMS` manifest. Artifacts are retained for **90 days**; download
+and a `SHA256SUMS` manifest. Artifacts are retained for **30 days**; download
 and archive the ones needed for a release before they expire.
 
 Release operators can download an artifact from the Actions UI for the
@@ -130,30 +137,25 @@ cd artifacts
 sha256sum -c SHA256SUMS
 ```
 
-Alternatively, rebuild from the same reviewed commit with `make build` and
-compare checksums against the manifest (or the downloaded files) to confirm the
-artifacts match a reproducible local build. Do not deploy binaries whose
-checksums do not match the reviewed output.
+To reproduce CI artifacts, rebuild with the pinned compiler and exactly
+`cargo build --workspace --locked --release --target wasm32v1-none`.
+`make build` uses the installed Stellar CLI and may apply additional optimization;
+its output is not guaranteed to match the raw Cargo CI hashes. Pin the CLI and
+optimizer versions and separately review/checksum any optimized output before
+using it. `deploy.sh` rebuilds rather than consuming a reviewed CI artifact, so
+it does not currently enforce that artifact's checksum. This release-provenance
+gap remains a blocker; do not treat a matching raw build as proof of deployed code.
 
 ## Verify WASM provenance
 
 CI uploads a `provenance.json` record alongside the WASM artifacts and
-`SHA256SUMS`. The record lists, for each artifact, the commit SHA, the Rust
-toolchain version, the build target (`wasm32v1-none`) and the artifact checksum.
-Before deploying a downloaded artifact:
-
-1. Recompute the checksum and compare it with both `SHA256SUMS` and the
-   `checksum` field in `provenance.json`:
-
-   ```sh
-   sha256sum remitpulse_account.wasm
-   grep remitpulse_account.wasm SHA256SUMS
-   ```
-
-2. Confirm the `commit` field matches the reviewed release commit
-   (`git rev-parse HEAD` on the reviewed checkout).
-3. Confirm the `toolchain` field matches `rust-toolchain.toml` and the `target`
-   field is `wasm32v1-none`.
+`SHA256SUMS`. The record contains `commit_sha`, `rustc_version`, `target`, and
+`sha256sums_sha256` (the SHA-256 of the entire manifest).
+Before using an artifact, run `sha256sum -c SHA256SUMS` from its extracted root,
+compare `sha256sum SHA256SUMS` with `sha256sums_sha256`, and compare `commit_sha`
+and `rustc_version` with the reviewed commit and pinned compiler.
+The manifest paths are relative to the extracted artifact root. Provenance JSON
+is unsigned metadata, not a cryptographic attestation of build identity.
 
 If any value differs, do not deploy the artifact; rebuild from the reviewed
 commit with the pinned toolchain instead.
@@ -164,6 +166,10 @@ Construct an account with `Config`: unique uncompressed SEC1 P-256 public keys
 (65 bytes), quorum `threshold`, SHA-256 of the WebAuthn RP ID (`rp_id_hash`), and
 an exact HTTPS origin encoded as bytes. Registration, attestation policy and
 credential ownership verification belong in the client enrollment flow.
+The on-chain constructor checks key prefix/coordinate range, not curve membership
+or possession. Use the preflight curve check and verify a real quorum before funding.
+The on-chain origin check is narrower than full URL canonicalization; enrollment
+must enforce canonical HTTPS origins and their RP-ID relationship.
 The constructor fixes this quorum for the lifetime of the account; this version
 has no recovery, key rotation or upgrade mechanism.
 
@@ -261,7 +267,7 @@ fails. No network deployments are performed by tests or CI.
 Deploy optional extracted components individually:
 
 ```sh
-# Set TOKEN, ROOT_HASH, FUNDER, ADMIN to the asset address, Merkle root and owners.
+# Set TOKEN, ROOT_HASH, FUNDER, ADMIN, and CLAIM_DEADLINE (future ledger sequence).
 ./deploy.sh testnet airdrop
 # Set OWNER, MAX_SUPPLY, METADATA (JSON with base_uri, name and symbol).
 ./deploy.sh testnet nft
@@ -283,7 +289,9 @@ Replay markers are bounded by an explicit epoch policy. The vault exposes
 can call `rotate_epoch()` to advance to the next epoch. Rotation clears the
 replay markers of the previous epoch, so instance storage grows only with the
 reimbursements recorded in the active epoch rather than for the vault's entire
-lifetime. Replay rejection is scoped to the active epoch: a reimbursement ID is
+lifetime. Each epoch is capped at 128 reimbursements; a full epoch rejects further
+payments until the administrator rotates it. The new ID index is for new vault
+instances; existing instances need a separately reviewed migration. Replay rejection is scoped to the active epoch: a reimbursement ID is
 rejected while its marker exists in the active epoch, and IDs from earlier
 epochs are no longer tracked. Operators must therefore treat reimbursement IDs
 as unique per epoch and choose a rotation cadence (for example, per settlement
@@ -302,16 +310,15 @@ account and enrollment flow.
 
 ## Interface reference
 
-[`docs/INTERFACES.md`](docs/INTERFACES.md) is the maintained reference for every
+[`docs/contract-interface.md`](docs/contract-interface.md) is the maintained reference for every
 public contract entrypoint, including authorization requirements, input
-validation, storage effects, emitted events and error codes. It is checked
-against the source in CI, so a contract change that alters an entrypoint, event
-or error without updating the reference fails the build. Consumers should treat
+validation, storage effects, emitted events and error codes. It is manually reviewed alongside the source; CI does not currently enforce
+specification/documentation consistency. Consumers should treat
 it as the stable interface contract; review it alongside any contract change.
 
 ## Mainnet deployment checklist
 
-[`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md) is the preflight
+[`docs/mainnet-deployment-checklist.md`](docs/mainnet-deployment-checklist.md) is the preflight
 checklist for production releases. It covers commit pinning, WASM checksum
 verification against the CI `SHA256SUMS` manifest, network and RPC
 configuration, administrator identity confirmation, and rollback/incident
@@ -322,18 +329,15 @@ committed; secrets stay in the operator's environment.
 
 ## Branch protection
 
-The `main` branch is protected:
-
-- Changes to `main` require a pull request; direct pushes are not permitted.
-- The contract CI workflow (`make ci`, including the contract test suite) is a
-  required status check that must pass before merge.
-- Force pushes and branch deletion are restricted to maintainers per the
-  repository's configured policy.
+GitHub reported `main` as **unprotected** during the 2026-11-05 review.
+Maintainers must configure pull-request review requirements, required CI checks,
+and force-push/deletion restrictions in repository settings before claiming they
+are enforced. This PR does not change repository settings.
 
 Documentation review is part of the pull-request expectations: changes that
 touch contract entrypoints, events or errors must update
-[`docs/INTERFACES.md`](docs/INTERFACES.md), and release-affecting changes must
-confirm the [mainnet checklist](docs/MAINNET_CHECKLIST.md) where applicable.
+[`docs/contract-interface.md`](docs/contract-interface.md), and release-affecting changes must
+confirm the [mainnet checklist](docs/mainnet-deployment-checklist.md) where applicable.
 
 ## Project documentation
 

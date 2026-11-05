@@ -1,4 +1,6 @@
-# Contract audit
+# Historical maintainer source review
+
+Current results supersede this earlier review: see [2026-11-05 readiness review](READINESS_REVIEW.md).
 
 ## Scope
 
