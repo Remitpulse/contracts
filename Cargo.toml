@@ -5,12 +5,13 @@ exclude = ["target"]
 
 [workspace.dependencies]
 soroban-sdk = "=22.0.11"
-stellar-fungible = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
-stellar-ownable = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
-stellar-crypto = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
-stellar-merkle-distributor = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
-stellar-default-impl-macro = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
-stellar-non-fungible = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.3.0" }
+# OpenZeppelin v0.3.0: immutable revision; no SDK/crypto API migration.
+stellar-fungible = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
+stellar-ownable = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
+stellar-crypto = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
+stellar-merkle-distributor = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
+stellar-default-impl-macro = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
+stellar-non-fungible = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "659fcabdc0e4712254dfebe4f45efd54f49826e9" }
 
 [profile.release]
 opt-level = "z"

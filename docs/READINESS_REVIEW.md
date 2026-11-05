@@ -1,5 +1,9 @@
 # Maintainer technical and security review — 2026-11-05
 
+The [follow-up](DEPENDENCY_PROVENANCE_FOLLOWUP.md) records the refreshed
+dependency resolution, fixture reconstruction and 70-test result. The 69-test
+results and hashes below describe the earlier source snapshot.
+
 This is a source review and local verification, not an independent security
 audit, certification, or production approval. No deployment or blockchain
 transaction was performed. No license terms were changed and no advisories were
