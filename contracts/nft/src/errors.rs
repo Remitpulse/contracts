@@ -12,4 +12,5 @@ pub enum NonFungibleTokenContractError {
     MaxBatchExceeded = 8,
     InsufficientSupply = 9,
     InvalidCursor = 10,
+    InvalidPageLimit = 11,
 }

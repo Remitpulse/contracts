@@ -216,11 +216,8 @@ fn test_exec_max_invocations_succeeds() {
     let contract_id = e.register(Router, ());
     let client = RouterClient::new(&e, &contract_id);
 
-    let mut invocations: soroban_sdk::Vec<(
-        Address,
-        soroban_sdk::Symbol,
-        soroban_sdk::Vec<Val>,
-    )> = vec![&e];
+    let mut invocations: soroban_sdk::Vec<(Address, soroban_sdk::Symbol, soroban_sdk::Vec<Val>)> =
+        vec![&e];
     for _ in 0..MAX_INVOCATIONS {
         invocations.push_back((
             token_client.address.clone(),
@@ -252,11 +249,8 @@ fn test_exec_too_many_invocations() {
     let contract_id = e.register(Router, ());
     let client = RouterClient::new(&e, &contract_id);
 
-    let mut invocations: soroban_sdk::Vec<(
-        Address,
-        soroban_sdk::Symbol,
-        soroban_sdk::Vec<Val>,
-    )> = vec![&e];
+    let mut invocations: soroban_sdk::Vec<(Address, soroban_sdk::Symbol, soroban_sdk::Vec<Val>)> =
+        vec![&e];
     for _ in 0..(MAX_INVOCATIONS + 1) {
         invocations.push_back((
             token_client.address.clone(),
@@ -266,7 +260,12 @@ fn test_exec_too_many_invocations() {
     }
 
     let result = client.try_exec(&caller, &invocations);
-    assert_eq!(result, Err(Ok(crate::RouterError::TooManyInvocations)));
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            crate::RouterError::TooManyInvocations as u32
+        )))
+    );
 
     // No dispatch should have occurred.
     assert_eq!(token_client.balance(&caller), (MAX_INVOCATIONS + 1) as i128);
@@ -290,19 +289,13 @@ fn test_exec_argument_too_large() {
     let client = RouterClient::new(&e, &contract_id);
 
     // Build an argument payload whose encoded size exceeds MAX_ARG_BYTES.
-    let big = soroban_sdk::Bytes::from_array(&e, &[0u8; 1]);
     let mut big_bytes = soroban_sdk::Bytes::new(&e);
     // Each byte contributes at least one byte to the encoded size; pad well past the limit.
     for _ in 0..(MAX_ARG_BYTES + 1) {
         big_bytes.extend_from_array(&[0u8]);
     }
-    let _ = big;
 
-    let invocations: soroban_sdk::Vec<(
-        Address,
-        soroban_sdk::Symbol,
-        soroban_sdk::Vec<Val>,
-    )> = vec![
+    let invocations: soroban_sdk::Vec<(Address, soroban_sdk::Symbol, soroban_sdk::Vec<Val>)> = vec![
         &e,
         (
             token_client.address.clone(),
@@ -312,7 +305,12 @@ fn test_exec_argument_too_large() {
     ];
 
     let result = client.try_exec(&caller, &invocations);
-    assert_eq!(result, Err(Ok(crate::RouterError::ArgumentTooLarge)));
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            crate::RouterError::ArgumentTooLarge as u32
+        )))
+    );
 
     // No dispatch should have occurred.
     assert_eq!(token_client.balance(&caller), 100);

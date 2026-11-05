@@ -146,7 +146,7 @@ fn validate_origin(e: &Env, origin: &Bytes) {
 #[contractimpl]
 impl Account {
     pub fn __constructor(e: Env, config: Config) {
-        if config.keys.len() == 0 || config.keys.len() > 10 {
+        if config.keys.is_empty() || config.keys.len() > 10 {
             e.panic_with_error(Error::InvalidKeyCount);
         }
         if config.threshold == 0 || config.threshold > config.keys.len() {
@@ -242,7 +242,7 @@ impl CustomAccountInterface for Account {
                 }
                 let mut seen = Vec::new(&e);
                 for assertion in assertions {
-                    if seen.contains(&assertion.key_index) {
+                    if seen.contains(assertion.key_index) {
                         return Err(Error::Invalid);
                     }
                     let key = config.keys.get(assertion.key_index).ok_or(Error::Invalid)?;

@@ -2,12 +2,14 @@
 
 #![cfg(test)]
 
-use crate::{AirdropContract, AirdropContractClient, Error};
+use crate::{AirdropContract, AirdropContractClient, AirdropError as Error};
 use hex_literal::hex;
 use soroban_sdk::{
     contract, contractimpl,
-    testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke},
-    vec, Address, BytesN, Env, IntoVal,
+    testutils::{
+        storage::Instance as _, Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke,
+    },
+    vec, Address, BytesN, Env, IntoVal, TryFromVal,
 };
 use stellar_default_impl_macro::default_impl;
 use stellar_fungible::{Base, FungibleToken};
@@ -469,7 +471,12 @@ fn test_recover_unclaimed_before_deadline_fails() {
     token_client.transfer(&token_owner, &contract_id, &1000);
 
     let result = client.try_recover_unclaimed();
-    assert_eq!(result, Err(Ok(Error::ClaimWindowOpen)));
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            Error::ClaimWindowOpen as u32
+        )))
+    );
 
     // Funds remain in the contract and the airdrop is still claimable.
     assert_eq!(token_client.balance(&contract_id), 1000);
@@ -501,18 +508,21 @@ fn test_recover_unclaimed_after_deadline_succeeds() {
     advance_past_deadline(&e);
 
     client.recover_unclaimed();
+    let events = e.events().all();
 
     assert_eq!(token_client.balance(&funder), 1000);
     assert_eq!(token_client.balance(&contract_id), 0);
     assert!(client.is_ended());
 
-    let events = e.events().all();
     let recovered_event = events
         .iter()
         .find(|(_, topics, _)| {
             topics
                 .get(0)
-                .map(|t| t == soroban_sdk::Symbol::new(&e, "recovered").into_val(&e))
+                .map(|t| {
+                    soroban_sdk::Symbol::try_from_val(&e, &t).ok()
+                        == Some(soroban_sdk::Symbol::new(&e, "recovered"))
+                })
                 .unwrap_or(false)
         })
         .expect("recovered event should be emitted");
@@ -527,23 +537,33 @@ fn test_instance_ttl_extended_on_lifecycle() {
     let owner = Address::generate(&e);
     let token_client = create_token_contract(&e, &owner);
 
-    let args = make_args(
+    let mut args = make_args(
         &e,
         hex!("11932105f1a4d0092e87cead3a543da5afd8adcff63f9a8ceb6c5db3c8135722"),
         token_client.address.clone(),
         owner.clone(),
         owner.clone(),
     );
+    args.4 = e.ledger().sequence() + 2 * crate::DAY_IN_LEDGERS + 2;
     let contract_id = e.register(AirdropContract, args);
     let client = AirdropContractClient::new(&e, &contract_id);
     token_client.transfer(&owner, &contract_id, &1000);
+
+    // Renew token balances too: OZ mint/transfer creates entries at default TTL.
+    token_client.balance(&contract_id);
+    token_client.balance(&owner);
+    // Maintain the token fixture separately while testing airdrop instance renewal.
+    e.as_contract(&token_client.address, || {
+        e.storage().instance().extend_ttl(120_960, 518_400)
+    });
 
     // TTL is set at construction.
     let ttl_after_construction = e.as_contract(&contract_id, || e.storage().instance().get_ttl());
     assert!(ttl_after_construction > 0);
 
     // Advance the ledger so the TTL has a chance to decay, then claim.
-    e.ledger().set_sequence_number(e.ledger().sequence() + 10);
+    e.ledger()
+        .set_sequence_number(e.ledger().sequence() + crate::DAY_IN_LEDGERS + 1);
 
     let receiver = Address::from_str(
         &e,
@@ -568,9 +588,34 @@ fn test_instance_ttl_extended_on_lifecycle() {
     assert!(ttl_after_claim >= ttl_after_construction);
 
     // Advance past the deadline and recover; TTL should be renewed again.
-    advance_past_deadline(&e);
+    e.ledger().set_sequence_number(client.claim_deadline());
     client.recover_unclaimed();
 
     let ttl_after_recovery = e.as_contract(&contract_id, || e.storage().instance().get_ttl());
     assert!(ttl_after_recovery >= ttl_after_claim);
+}
+
+#[test]
+fn claims_close_at_deadline_before_proof_or_transfer() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let admin = Address::generate(&e);
+    let token = create_token_contract(&e, &admin);
+    let args = make_args(
+        &e,
+        [1; 32],
+        token.address.clone(),
+        admin.clone(),
+        admin.clone(),
+    );
+    let id = e.register(AirdropContract, args);
+    let client = AirdropContractClient::new(&e, &id);
+    e.ledger().set_sequence_number(client.claim_deadline());
+    assert_eq!(
+        client.try_claim(&0, &admin, &1, &vec![&e]),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            Error::ClaimWindowClosed as u32
+        )))
+    );
+    assert!(!client.is_claimed(&0));
 }
