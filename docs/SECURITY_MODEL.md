@@ -10,7 +10,8 @@ per-transfer cap, and remaining budget. They may authorize only SEP-41 transfers
 from the account. A passkey quorum can revoke a session or pause all sessions.
 
 The subsidy vault requires administrator authorization, positive amounts, unique
-IDs, and sufficient balance. It does not sponsor Stellar fees or enforce an
+IDs within the active epoch, and sufficient balance. Epochs are capped at 128
+reimbursements; rotation deletes active markers and permits old IDs again. It does not sponsor Stellar fees or enforce an
 off-chain fee policy. The generic router deliberately has no allowlist and must
 not be treated as a policy boundary.
 
