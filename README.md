@@ -2,6 +2,9 @@
 
 Rust/Soroban contracts for RemitPulse, a passkey-powered Stellar remittance app.
 
+See the [dependency/provenance follow-up](docs/DEPENDENCY_PROVENANCE_FOLLOWUP.md)
+and [latest consumer compatibility matrix](docs/COMPATIBILITY_REVIEW.md).
+
 **Integration/release status:** the dependency audit currently fails on
 RUSTSEC-2026-0387 (no suppression); current frontend and backend main branches do not
 match the account/subsidy ABI. Router upstream licensing remains unresolved.
