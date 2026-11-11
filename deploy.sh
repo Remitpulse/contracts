@@ -4,8 +4,8 @@
 # Never commit private keys or other secrets; supply them only via environment/CLI identity.
 set -euo pipefail
 cd "$(dirname "$0")"
-network=${1:-testnet}
-component=${2:-core}
+network=${1-testnet}
+component=${2-core}
 case "$network" in testnet|mainnet) ;; *) echo "Network must be testnet or mainnet (got '$network')" >&2; exit 2;; esac
 case "$component" in core|router|webauthn|account|subsidy|airdrop|nft) ;; *) echo "Unknown component '$component' (expected one of: core, router, webauthn, account, subsidy, airdrop, nft)" >&2; exit 2;; esac
 case "$network" in
@@ -30,7 +30,7 @@ case "$component" in
 esac
 case "$component" in core|subsidy|airdrop) : "${ADMIN:?Set ADMIN to the administrator address or CLI identity}";; esac
 case "$component" in
-  airdrop) : "${ROOT_HASH:?Set ROOT_HASH to the airdrop Merkle root}" "${TOKEN:?Set TOKEN to the token contract address}" "${FUNDER:?Set FUNDER to the funding address or CLI identity}";;
+  airdrop) : "${ROOT_HASH:?Set ROOT_HASH to the airdrop Merkle root}" "${TOKEN:?Set TOKEN to the token contract address}" "${FUNDER:?Set FUNDER to the funding address or CLI identity}" "${CLAIM_DEADLINE:?Set CLAIM_DEADLINE to a future ledger sequence}";;
   nft) : "${OWNER:?Set OWNER to the NFT owner address or CLI identity}" "${MAX_SUPPLY:?Set MAX_SUPPLY to the maximum token supply}" "${METADATA:?Set METADATA JSON}";;
 esac
 if ! python3 scripts/validate_deployment.py "$component"; then
@@ -72,7 +72,7 @@ case "$component" in
   core) deploy router; deploy webauthn; deploy account --config "$ACCOUNT_CONFIG"; deploy subsidy --admin "$ADMIN";;
   account) deploy account --config "$ACCOUNT_CONFIG";;
   subsidy) deploy subsidy --admin "$ADMIN";;
-  airdrop) deploy airdrop --root_hash "$ROOT_HASH" --token "$TOKEN" --admin "$ADMIN" --funder "$FUNDER";;
+  airdrop) deploy airdrop --root_hash "$ROOT_HASH" --token "$TOKEN" --admin "$ADMIN" --funder "$FUNDER" --claim_deadline "$CLAIM_DEADLINE";;
   nft) deploy nft --owner "$OWNER" --max_supply "$MAX_SUPPLY" --metadata "$METADATA";;
   *) deploy "$component";;
 esac

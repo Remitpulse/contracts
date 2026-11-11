@@ -60,7 +60,9 @@ fn replay_rejection_is_scoped_to_active_epoch() {
     let e = Env::default();
     let admin = Address::generate(&e);
     let vault = e.register(Subsidy, (&admin,));
-    let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+    let asset = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let recipient = Address::generate(&e);
     let client = SubsidyClient::new(&e, &vault);
     let id = BytesN::from_array(&e, &[4; 32]);
@@ -105,7 +107,9 @@ fn failed_transfer_rolls_back_marker_within_epoch() {
     let e = Env::default();
     let admin = Address::generate(&e);
     let vault = e.register(Subsidy, (&admin,));
-    let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+    let asset = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let recipient = Address::generate(&e);
     let client = SubsidyClient::new(&e, &vault);
     let id = BytesN::from_array(&e, &[5; 32]);
@@ -121,4 +125,82 @@ fn failed_transfer_rolls_back_marker_within_epoch() {
         client.try_reimburse(&id, &asset, &recipient, &10),
         Err(Ok(Error::AlreadyReimbursed))
     );
+}
+
+#[test]
+fn epoch_rotation_clears_storage_and_checks_overflow() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let vault = e.register(Subsidy, (&admin,));
+    let asset = e.register_stellar_asset_contract_v2(admin).address();
+    let client = SubsidyClient::new(&e, &vault);
+    let id = BytesN::from_array(&e, &[9; 32]);
+    e.mock_all_auths();
+    token::StellarAssetClient::new(&e, &asset).mint(&vault, &10);
+    client.reimburse(&id, &asset, &Address::generate(&e), &1);
+    client.rotate_epoch();
+    e.as_contract(&vault, || {
+        assert!(!e.storage().instance().has(&Key::Used(0, id.clone())));
+        assert!(!e.storage().instance().has(&Key::EpochIds));
+        e.storage().instance().set(&Key::ActiveEpoch, &u32::MAX);
+    });
+    assert_eq!(client.try_rotate_epoch(), Err(Ok(Error::EpochExhausted)));
+    assert_eq!(client.active_epoch(), u32::MAX);
+}
+
+#[test]
+fn epoch_capacity_rejects_payment_until_rotation() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let vault = e.register(Subsidy, (&admin,));
+    let asset = e.register_stellar_asset_contract_v2(admin).address();
+    let recipient = Address::generate(&e);
+    let client = SubsidyClient::new(&e, &vault);
+    e.mock_all_auths();
+    token::StellarAssetClient::new(&e, &asset).mint(&vault, &1000);
+    for i in 0..MAX_REIMBURSEMENTS {
+        let mut bytes = [0; 32];
+        bytes[..4].copy_from_slice(&i.to_be_bytes());
+        client.reimburse(&BytesN::from_array(&e, &bytes), &asset, &recipient, &1);
+    }
+    let id = BytesN::from_array(&e, &[255; 32]);
+    assert_eq!(
+        client.try_reimburse(&id, &asset, &recipient, &1),
+        Err(Ok(Error::EpochFull))
+    );
+    assert!(!client.is_reimbursed(&id));
+    assert_eq!(
+        token::Client::new(&e, &asset).balance(&recipient),
+        MAX_REIMBURSEMENTS as i128
+    );
+    client.rotate_epoch();
+    client.reimburse(&id, &asset, &recipient, &1);
+}
+
+#[contract]
+struct RejectingToken;
+#[contractimpl]
+impl RejectingToken {
+    pub fn balance(_e: Env, _owner: Address) -> i128 {
+        100
+    }
+    pub fn transfer(_e: Env, _from: Address, _to: Address, _amount: i128) {
+        panic!("transfer rejected")
+    }
+}
+
+#[test]
+fn downstream_token_failure_rolls_back_marker_and_capacity() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let vault = e.register(Subsidy, (&admin,));
+    let token = e.register(RejectingToken, ());
+    let client = SubsidyClient::new(&e, &vault);
+    let id = BytesN::from_array(&e, &[17; 32]);
+    e.mock_all_auths();
+    assert!(client.try_reimburse(&id, &token, &admin, &1).is_err());
+    assert!(!client.is_reimbursed(&id));
+    e.as_contract(&vault, || {
+        assert!(!e.storage().instance().has(&Key::EpochIds));
+    });
 }

@@ -32,6 +32,7 @@ enum AirdropError {
     Ended = 1000,
     ClaimWindowOpen = 1001,
     InvalidClaimDeadline = 1002,
+    ClaimWindowClosed = 1003,
 }
 
 #[contracttype]
@@ -142,6 +143,9 @@ impl AirdropContract {
             panic_with_error!(e, AirdropError::Ended);
         }
 
+        if e.ledger().sequence() >= Self::claim_deadline(e) {
+            panic_with_error!(e, AirdropError::ClaimWindowClosed);
+        }
         receiver.require_auth();
 
         let data = Receiver {

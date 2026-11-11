@@ -1,4 +1,3 @@
-#![cfg(test)]
 extern crate std;
 use crate::{
     contract::{Contract, ContractClient, MAX_BULK_MINT},
@@ -10,7 +9,7 @@ use soroban_sdk::{
         Address as _, AuthorizedFunction, AuthorizedInvocation, EnvTestConfig, Ledger as _,
         MockAuth, MockAuthInvoke,
     },
-    vec, Address, Env, IntoVal, String, Symbol, TryFromVal, Vec,
+    vec, Address, Env, IntoVal, String, Symbol, Vec,
 };
 
 const INITIAL_SEQUENCE_NUMBER: u32 = 10;
@@ -95,7 +94,7 @@ fn test_mint_success() {
     assert_eq!(contract.total_supply(), 1);
     assert_eq!(contract.owner_of(&token_id), recipient);
     assert_eq!(
-        contract.get_owner_tokens_page(&recipient, &None, &10u32),
+        contract.get_owner_tokens_page(&recipient, &None, &10u32).0,
         vec![&env, token_id]
     );
 }
@@ -141,7 +140,7 @@ fn test_bulk_mint_success() {
     assert_eq!(contract.owner_of(&123456), recipient);
     assert_eq!(contract.owner_of(&789012), recipient);
     assert_eq!(
-        contract.get_owner_tokens_page(&recipient, &None, &10u32),
+        contract.get_owner_tokens_page(&recipient, &None, &10u32).0,
         vec![&env, 123456, 789012]
     );
 }
@@ -300,8 +299,8 @@ fn test_get_owner_tokens() {
     contract.mint(&recipient1, &2u32);
     contract.mint(&recipient2, &3u32);
 
-    let recipient1_tokens = contract.get_owner_tokens_page(&recipient1, &None, &10u32);
-    let recipient2_tokens = contract.get_owner_tokens_page(&recipient2, &None, &10u32);
+    let recipient1_tokens = contract.get_owner_tokens_page(&recipient1, &None, &10u32).0;
+    let recipient2_tokens = contract.get_owner_tokens_page(&recipient2, &None, &10u32).0;
 
     assert_eq!(recipient1_tokens.len(), 2);
     assert_eq!(recipient2_tokens.len(), 1);
@@ -319,7 +318,9 @@ fn test_get_owner_tokens_empty() {
 
     contract.mint(&recipient, &1u32);
 
-    let empty_tokens = contract.get_owner_tokens_page(&empty_owner, &None, &10u32);
+    let empty_tokens = contract
+        .get_owner_tokens_page(&empty_owner, &None, &10u32)
+        .0;
     assert_eq!(empty_tokens.len(), 0);
 }
 
@@ -330,7 +331,7 @@ fn test_get_owner_tokens_page_empty() {
     let empty_owner = Address::generate(&env);
     let contract = get_contract(&env, &owner, 100u32);
 
-    let page = contract.get_owner_tokens_page(&empty_owner, &None, &5u32);
+    let page = contract.get_owner_tokens_page(&empty_owner, &None, &5u32).0;
     assert_eq!(page.len(), 0);
 }
 
@@ -347,22 +348,23 @@ fn test_get_owner_tokens_page_partial_and_final() {
 
     // First page: partial (limit 2).
     let page1 = contract.get_owner_tokens_page(&recipient, &None, &2u32);
-    assert_eq!(page1, vec![&env, 1u32, 2u32]);
+    assert_eq!(page1, (vec![&env, 1u32, 2u32], Some(2)));
 
     // Second page: continues after cursor 2.
     let page2 = contract.get_owner_tokens_page(&recipient, &Some(2u32), &2u32);
-    assert_eq!(page2, vec![&env, 3u32, 4u32]);
+    assert_eq!(page2, (vec![&env, 3u32, 4u32], Some(4)));
 
     // Final page: fewer than limit.
     let page3 = contract.get_owner_tokens_page(&recipient, &Some(4u32), &2u32);
-    assert_eq!(page3, vec![&env, 5u32]);
+    assert_eq!(page3, (vec![&env, 5u32], None));
 
     // Past the end: empty.
     let page4 = contract.get_owner_tokens_page(&recipient, &Some(5u32), &2u32);
-    assert_eq!(page4.len(), 0);
+    assert_eq!(page4, (vec![&env], None));
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #10)")]
 fn test_get_owner_tokens_page_invalid_cursor() {
     let env = setup_test_env();
     let owner = Address::generate(&env);
@@ -372,8 +374,10 @@ fn test_get_owner_tokens_page_invalid_cursor() {
     contract.mint(&recipient, &1u32);
     contract.mint(&recipient, &2u32);
 
-    // Cursor not present in the owner's collection yields an empty page.
-    let page = contract.get_owner_tokens_page(&recipient, &Some(999u32), &10u32);
+    // Cursor must name a token still present in this owner's collection.
+    let page = contract
+        .get_owner_tokens_page(&recipient, &Some(999u32), &10u32)
+        .0;
     assert_eq!(page.len(), 0);
 }
 
@@ -489,7 +493,7 @@ fn test_ttl_renewal_keeps_state_accessible() {
     assert_eq!(retrieved.session_id, token_data.session_id);
     assert_eq!(retrieved.resource, token_data.resource);
 
-    let page = contract.get_owner_tokens_page(&recipient, &None, &10u32);
+    let page = contract.get_owner_tokens_page(&recipient, &None, &10u32).0;
     assert_eq!(page, vec![&env, token_id]);
 
     // Instance state remains accessible.
@@ -678,6 +682,21 @@ fn test_mint_with_data_unauthorized() {
     contract.mint_with_data(&recipient, &1u32, &token_data);
 }
 
-// Silence unused import warnings for helpers used only in some configurations.
-#[allow(dead_code)]
-fn _assert_try_from_val<T: TryFromVal<Env, soroban_sdk::Val>>() {}
+#[test]
+fn pagination_preserves_out_of_order_mints_and_incoming_transfers() {
+    let env = setup_test_env();
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let contract = get_contract(&env, &owner, 100);
+    contract.mint(&recipient, &30);
+    contract.mint(&recipient, &10);
+    contract.mint(&owner, &20);
+    contract.transfer(&owner, &recipient, &20);
+    let (first, cursor) = contract.get_owner_tokens_page(&recipient, &None, &2);
+    assert_eq!(first, vec![&env, 10, 20]);
+    assert_eq!(cursor, Some(20));
+    assert_eq!(
+        contract.get_owner_tokens_page(&recipient, &cursor, &2),
+        (vec![&env, 30], None)
+    );
+}

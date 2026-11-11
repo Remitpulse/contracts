@@ -28,12 +28,17 @@ fn extend_instance_ttl(env: &Env) {
 }
 
 fn extend_persistent_ttl(env: &Env, key: &DataKey) {
-    env.storage()
-        .persistent()
-        .extend_ttl(key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND_TO);
+    // Empty owner queries have no entry to renew. Archived entries still require restoration.
+    if env.storage().persistent().has(key) {
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
+    }
 }
 
-fn extend_nft_persistent_ttl(env: &Env, key: &NFTStorageKey<u32>) {
+fn extend_nft_persistent_ttl(env: &Env, key: &NFTStorageKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND_TO);
@@ -272,13 +277,11 @@ impl NonFungibleToken for Contract {
     ) {
         extend_instance_ttl(e);
         Base::approve(e, &approver, &approved, token_id, live_until_ledger);
-        extend_nft_persistent_ttl(e, &NFTStorageKey::Approve(token_id));
     }
 
     fn approve_for_all(e: &Env, owner: Address, operator: Address, live_until_ledger: u32) {
         extend_instance_ttl(e);
         Base::approve_for_all(e, &owner, &operator, live_until_ledger);
-        extend_nft_persistent_ttl(e, &NFTStorageKey::Approval(owner, operator));
     }
 
     fn get_approved(e: &Env, token_id: u32) -> Option<Address> {
@@ -324,20 +327,21 @@ fn add_token_to_owner_list(env: &Env, owner: &Address, token_id: u32) {
         .persistent()
         .get(&key)
         .unwrap_or_else(|| vec![env]);
-    tokens.push_back(token_id);
+    // Pagination uses an exclusive token-ID cursor, so insertion order must be sorted.
+    let mut position = 0;
+    while position < tokens.len() && tokens.get(position).unwrap() < token_id {
+        position += 1;
+    }
+    tokens.insert(position, token_id);
     env.storage().persistent().set(&key, &tokens);
     extend_persistent_ttl(env, &key);
 }
 
 fn remove_token_from_owner_list(env: &Env, owner: &Address, token_id: u32) {
     let key = DataKey::OwnerTokens(owner.clone());
-    let mut tokens: Vec<u32> = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or_else(|| {
-            panic_with_error!(env, NonFungibleTokenContractError::TokenDoesNotExist)
-        });
+    let mut tokens: Vec<u32> = env.storage().persistent().get(&key).unwrap_or_else(|| {
+        panic_with_error!(env, NonFungibleTokenContractError::TokenDoesNotExist)
+    });
     if let Some(pos) = tokens.first_index_of(token_id) {
         tokens.remove(pos);
         env.storage().persistent().set(&key, &tokens);

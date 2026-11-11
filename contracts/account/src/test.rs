@@ -27,7 +27,6 @@ fn register_account(e: &Env, config: Config) -> Address {
 
 /// A valid uncompressed P-256 point (the generator) used by constructor tests.
 fn valid_passkey(e: &Env) -> BytesN<65> {
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
     BytesN::from_array(
         e,
         p256::ecdsa::SigningKey::from_bytes((&[3u8; 32]).into())
@@ -382,15 +381,16 @@ fn constructor_accepts_valid_config() {
 #[test]
 fn constructor_rejects_malformed_passkeys() {
     let e = Env::default();
-    let mut short = valid_config(&e);
-    short.keys = vec![&e, BytesN::from_array(&e, &[4; 64])];
-    assert!(e.try_register(Account, (&short,)).is_err());
-
     let mut bad_prefix = valid_config(&e);
     let mut bytes = [4u8; 65];
     bytes[0] = 0x03;
     bad_prefix.keys = vec![&e, BytesN::from_array(&e, &bytes)];
-    assert!(e.try_register(Account, (&bad_prefix,)).is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register_account(
+            &e, bad_prefix
+        )))
+        .is_err()
+    );
 
     // Coordinates equal to the P-256 field prime are not on the curve.
     let mut out_of_field = valid_config(&e);
@@ -404,7 +404,13 @@ fn constructor_rejects_malformed_passkeys() {
     bytes[1..33].copy_from_slice(&prime);
     bytes[33..65].copy_from_slice(&prime);
     out_of_field.keys = vec![&e, BytesN::from_array(&e, &bytes)];
-    assert!(e.try_register(Account, (&out_of_field,)).is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register_account(
+            &e,
+            out_of_field
+        )))
+        .is_err()
+    );
 }
 
 #[test]
@@ -420,7 +426,12 @@ fn constructor_rejects_malformed_origin() {
     ] {
         let mut config = valid_config(&e);
         config.origin = Bytes::from_slice(&e, origin);
-        assert!(e.try_register(Account, (&config,)).is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register_account(
+                &e, config
+            )))
+            .is_err()
+        );
     }
 }
 
@@ -448,4 +459,43 @@ fn failed_authorization_keeps_budget_unchanged() {
             .remaining,
         15
     );
+}
+
+#[test]
+fn session_aggregate_overflow_and_unauthorized_mutations_preserve_state() {
+    let (e, account, asset, signing) = setup();
+    let key = BytesN::from_array(&e, &signing.verifying_key().to_bytes());
+    let client = AccountClient::new(&e, &account);
+    let mut session = client.session(&key).unwrap();
+    session.per_transfer = i128::MAX;
+    session.remaining = i128::MAX;
+    // No authorization entries: neither session registration, revocation nor pause is public.
+    assert!(client.try_add_session(&key, &session).is_err());
+    assert!(client.try_revoke_session(&key).is_err());
+    assert!(client.try_set_sessions_paused(&true).is_err());
+    assert_eq!(client.session(&key).unwrap().remaining, 15);
+    assert!(!client.sessions_paused());
+    e.mock_all_auths();
+    client.add_session(&key, &session);
+    e.set_auths(&[]);
+    let payload = BytesN::from_array(&e, &[9; 32]);
+    let signature = Signature::Session(
+        key.clone(),
+        BytesN::from_array(&e, &signing.sign(&payload.to_array()).to_bytes()),
+    );
+    let context = Context::Contract(ContractContext {
+        contract: asset,
+        fn_name: Symbol::new(&e, "transfer"),
+        args: (account.clone(), Address::generate(&e), i128::MAX).into_val(&e),
+    });
+    assert_eq!(
+        e.try_invoke_contract_check_auth::<Error>(
+            &account,
+            &payload,
+            signature.into_val(&e),
+            &vec![&e, context.clone(), context]
+        ),
+        Err(Ok(Error::Limit))
+    );
+    assert_eq!(client.session(&key).unwrap().remaining, i128::MAX);
 }

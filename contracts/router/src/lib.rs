@@ -4,7 +4,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, panic_with_error, vec, Address, Env, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, panic_with_error, vec, xdr::ToXdr, Address, Env, Symbol,
+    Val, Vec,
 };
 
 pub const DAY_IN_LEDGERS: u32 = 17280;
@@ -65,11 +66,10 @@ impl Router {
             panic_with_error!(&e, RouterError::TooManyInvocations);
         }
 
-        for (contract, method, args) in invocations.iter() {
-            if args.len() > MAX_ARG_BYTES {
+        for (_, _, args) in invocations.iter() {
+            if args.to_xdr(&e).len() > MAX_ARG_BYTES {
                 panic_with_error!(&e, RouterError::ArgumentTooLarge);
             }
-            let _ = (contract, method);
         }
 
         let mut results: Vec<Val> = vec![&e];

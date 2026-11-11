@@ -29,7 +29,7 @@ ci-clippy:
 # ShellCheck deployment scripts. SC1091 is excluded because sourced files are
 # resolved at runtime and not statically analyzable.
 shellcheck:
-	shellcheck --exclude=SC1091 deploy.sh scripts/build.sh
+	shellcheck deploy.sh scripts/build.sh
 # Lockfile-based vulnerability scan; consumes Cargo.lock and fails on advisories.
 audit:
 	cargo audit --file Cargo.lock
@@ -66,38 +66,13 @@ checksums:
 # Reproducible build check: build twice into isolated output directories and
 # compare checksums of every emitted remitpulse WASM artifact.
 reproducible-build:
-	rm -rf "$(REPRO_DIR)"
-	mkdir -p "$(REPRO_DIR)/build-a" "$(REPRO_DIR)/build-b"
-	STELLAR_CLI="$(STELLAR_CLI)" OUT_DIR="$(REPRO_DIR)/build-a" ./scripts/build.sh
-	STELLAR_CLI="$(STELLAR_CLI)" OUT_DIR="$(REPRO_DIR)/build-b" ./scripts/build.sh
+	CARGO_TARGET_DIR="$(abspath $(REPRO_DIR))/build-a" cargo build --workspace --locked --release --target wasm32v1-none
+	CARGO_TARGET_DIR="$(abspath $(REPRO_DIR))/build-b" cargo build --workspace --locked --release --target wasm32v1-none
 	@set -e; \
-	cd "$(REPRO_DIR)/build-a"; \
-	files=$$(find . -type f -name '*remitpulse*.wasm' | sort); \
-	if [ -z "$$files" ]; then \
-		echo "ERROR: no remitpulse WASM artifacts found in $(REPRO_DIR)/build-a" >&2; \
-		exit 1; \
-	fi; \
-	status=0; \
-	for f in $$files; do \
-		a="$(REPRO_DIR)/build-a/$$f"; \
-		b="$(REPRO_DIR)/build-b/$$f"; \
-		if [ ! -f "$$b" ]; then \
-			echo "ERROR: missing artifact in second build: $$f" >&2; \
-			status=1; \
-			continue; \
-		fi; \
-		ha=$$(sha256sum "$$a" | cut -d' ' -f1); \
-		hb=$$(sha256sum "$$b" | cut -d' ' -f1); \
-		if [ "$$ha" != "$$hb" ]; then \
-			echo "ERROR: checksum mismatch for $$f" >&2; \
-			echo "  build-a: $$ha" >&2; \
-			echo "  build-b: $$hb" >&2; \
-			status=1; \
-		else \
-			echo "OK: $$f $$ha"; \
-		fi; \
+	for build in build-a build-b; do \
+		(cd "$(REPRO_DIR)/$$build/wasm32v1-none/release" && sha256sum remitpulse_*.wasm) > "$(REPRO_DIR)/$$build.sha256"; \
 	done; \
-	exit $$status
+	diff -u "$(REPRO_DIR)/build-a.sha256" "$(REPRO_DIR)/build-b.sha256"
 
 verify: check test-wasm checksums
 # Full CI quality gate: formatting, tests, clippy (warnings denied), shell

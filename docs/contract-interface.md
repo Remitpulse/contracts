@@ -1,454 +1,129 @@
-# Contract Interface & Event Reference
-
-This document is the maintained reference for every public entrypoint exposed by the
-contracts in this repository. It records, for each entrypoint:
-
-- **Authorization** — who may call it and what must be proven.
-- **Input validation** — constraints the contract enforces on arguments.
-- **Storage effects** — persistent state that is read or written.
-- **Events** — events emitted (topic / data shape).
-- **Errors** — error codes or messages that may be returned.
-
-> **Maintenance requirement:** this document MUST be updated in the same pull request
-> whenever a public entrypoint, its authorization, its storage effects, its events, or
-> its error surface changes. Reviewers should treat an out-of-date interface reference
-> as a blocking issue. See the "Pull-request expectations" section at the end.
-
-Contracts covered:
-
-- [`account`](#account-contract) — session and passkey management.
-- [`airdrop`](#airdrop-contract) — claim and recover flows.
-- [`nft`](#nft-contract) — mint, transfer, burn.
-- [`router`](#router-contract) — `exec`.
-- [`subsidy`](#subsidy-contract) — `reimburse`.
-- [`webauthn`](#webauthn-contract) — `verify`.
-
-Conventions used below:
-
-- **Caller** refers to the transaction signer / invoker identity as seen by the contract.
-- **Admin** refers to the privileged address configured at initialization.
-- **Auth** values: `none` (permissionless), `caller` (must be the authenticated caller),
-  `admin` (must be the configured admin), `signature` (must present a valid signature),
-  `passkey` (must present a valid WebAuthn assertion).
-- All amounts are in the contract's smallest unit unless stated otherwise.
-
----
-
-## `account` contract
-
-Manages account sessions and passkey credentials. The account contract is the
-authorization root for user actions: sessions and passkeys are the two mechanisms by
-which a user authorizes calls.
-
-### constructor
-
-- **Auth:** `none` (invoked once at deployment).
-- **Input validation:**
-  - Must not already be initialized; admin address must be non-zero.
-  - Each initial passkey public key must be an uncompressed P-256 (SEC1) point:
-    a valid `0x04`-prefixed encoding of a point on the P-256 curve.
-  - The RP ID binding must be a 32-byte hash (e.g. SHA-256 of the RP ID).
-  - The origin must be a canonical HTTPS origin (scheme `https`, a host, no path,
-    query, fragment, or trailing slash).
-- **Storage effects:** writes admin address, initial passkeys, RP ID hash, origin,
-  and initialization flag.
-- **Events:** none.
-- **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidPasskey`, `InvalidRpIdHash`,
-  `InvalidOrigin`.
-
-### `create_session`
-
-Creates a scoped session key that can act on behalf of the account until expiry.
-
-- **Auth:** `caller` (the account owner) or a valid `passkey` assertion.
-- **Input validation:**
-  - Session public key must be non-zero and not already registered.
-  - `expires_at` must be in the future.
-  - Scope/permissions must be a subset of the owner's permissions.
-- **Storage effects:** writes a new session record (key, scope, `expires_at`).
-- **Events:** `session_created` — topics: `[session_created, account]`; data: `(session_key, expires_at, scope)`.
-- **Errors:** `Unauthorized`, `SessionExists`, `InvalidExpiry`, `ScopeExceedsOwner`.
-
-### `revoke_session`
-
-Revokes an existing session key.
-
-- **Auth:** `caller` (owner) or `admin`.
-- **Input validation:** session key must exist.
-- **Storage effects:** removes/marks the session record as revoked.
-- **Events:** `session_revoked` — topics: `[session_revoked, account]`; data: `(session_key)`.
-- **Errors:** `Unauthorized`, `SessionNotFound`.
-
-### `register_passkey`
-
-Registers a WebAuthn credential for the account.
-
-- **Auth:** `caller` (owner) or `admin`.
-- **Input validation:**
-  - Credential ID must be non-empty and not already registered.
-  - Public key must be a valid encoded COSE key.
-  - Signature counter must be initialized to `0`.
-- **Storage effects:** writes a passkey record (credential ID, public key, counter).
-- **Events:** `passkey_registered` — topics: `[passkey_registered, account]`; data: `(credential_id)`.
-- **Errors:** `Unauthorized`, `PasskeyExists`, `InvalidCredential`.
-
-### `remove_passkey`
-
-Removes a registered passkey credential.
-
-- **Auth:** `caller` (owner) or `admin`.
-- **Input validation:** credential ID must exist.
-- **Storage effects:** deletes the passkey record.
-- **Events:** `passkey_removed` — topics: `[passkey_removed, account]`; data: `(credential_id)`.
-- **Errors:** `Unauthorized`, `PasskeyNotFound`.
-
-### `authenticate_passkey`
-
-Verifies a WebAuthn assertion and, on success, authorizes the requested action.
-
-- **Auth:** `passkey` (assertion over the challenge and action payload).
-- **Input validation:**
-  - Credential ID must be registered.
-  - Assertion signature must verify against the stored public key.
-  - Signature counter must be strictly greater than the stored counter (replay protection).
-  - Challenge must match the expected value for the action.
-- **Storage effects:** updates the stored signature counter.
-- **Events:** `passkey_authenticated` — topics: `[passkey_authenticated, account]`; data: `(credential_id, new_counter)`.
-- **Errors:** `PasskeyNotFound`, `InvalidSignature`, `CounterReplay`, `ChallengeMismatch`.
-
-### `is_authorized`
-
-Read-only authorization check used by other contracts.
-
-- **Auth:** `none`.
-- **Input validation:** account and action must be provided.
-- **Storage effects:** reads session/passkey records only.
-- **Events:** none.
-- **Errors:** none (returns boolean).
-
----
-
-## `airdrop` contract
-
-Distributes tokens to eligible recipients with a claim and a recover path.
-
-### `__constructor` (deployment)
-
-- **Auth:** `none` (deployment only).
-- **Input validation:**
-  - Admin address must be non-zero.
-  - Token address must be non-zero.
-  - `claim_deadline` must be a future ledger timestamp (strictly greater than the
-    current ledger time); a deadline in the past is rejected.
-- **Storage effects:** writes admin, token address, the immutable `claim_deadline`,
-  and the initialization flag. Extends the contract instance TTL to the configured
-  threshold at construction so the instance does not rely on default storage lifetime.
-- **Events:** none.
-- **Errors:** `InvalidAdmin`, `InvalidToken`, `InvalidDeadline`.
-
-### `claim_deadline`
-
-Read-only getter for the immutable claim deadline.
-
-- **Auth:** `none`.
-- **Input validation:** none.
-- **Storage effects:** reads the stored `claim_deadline` only.
-- **Events:** none.
-- **Errors:** none (returns the ledger timestamp after which recovery is permitted).
-
-### `init`
-
-- **Auth:** `none` (deployment only).
-- **Input validation:** must not already be initialized; admin non-zero; token address non-zero.
-- **Storage effects:** writes admin, token address, initialization flag; extends the
-  instance TTL to the configured threshold.
-- **Events:** none.
-- **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidToken`.
-
-### `set_merkle_root`
-
-Sets the eligibility Merkle root for a distribution round.
-
-- **Auth:** `admin`.
-- **Input validation:** root must be non-zero; round must not be finalized.
-- **Storage effects:** writes the Merkle root for the round.
-- **Events:** `root_updated` — topics: `[root_updated, round]`; data: `(root)`.
-- **Errors:** `Unauthorized`, `RoundFinalized`, `InvalidRoot`.
-
-### `claim`
-
-Claims an allocation for the caller using a Merkle proof.
-
-- **Auth:** `caller` (recipient).
-- **Input validation:**
-  - `(caller, amount)` must be a leaf in the tree for the current root.
-  - Proof must verify against the stored root.
-  - Allocation must not already have been claimed.
-  - `amount` must be greater than zero.
-- **Storage effects:** marks the allocation claimed; transfers tokens to the caller;
-  renews the instance TTL.
-- **Events:** `claimed` — topics: `[claimed, caller]`; data: `(amount, round)`.
-- **Errors:** `Unauthorized`, `InvalidProof`, `AlreadyClaimed`, `InvalidAmount`, `TransferFailed`.
-
-### `recover_unclaimed`
-
-Recovers unclaimed or misdirected funds back to the admin/treasury after the claim
-window closes.
-
-- **Auth:** `admin`.
-- **Input validation:**
-  - The current ledger time must be at or after the immutable `claim_deadline`;
-    recovery before the deadline is rejected with `ClaimWindowOpen`.
-  - Recoverable amount must be greater than zero.
-- **Storage effects:** decrements the round's remaining balance; transfers tokens to the
-  admin; renews the instance TTL.
-- **Events:** `recovered` — topics: `[recovered, round]`; data: `(amount)`.
-- **Errors:** `Unauthorized`, `ClaimWindowOpen`, `NothingToRecover`, `TransferFailed`.
-
-### Instance TTL lifecycle
-
-The airdrop instance maintains an explicit storage lifetime policy rather than relying
-on the default:
-
-- The instance TTL is set to the configured threshold at construction.
-- Every state-changing entrypoint (`set_merkle_root`, `claim`, `recover_unclaimed`)
-  renews the instance TTL to the configured threshold and extension, so an active
-  contract does not expire between operations.
-- The threshold and extension values are configuration constants; tests assert both the
-  configured threshold and the extension behavior after each state-changing path.
-
-### `is_claimed`
-
-Read-only claim status.
-
-- **Auth:** `none`.
-- **Input validation:** recipient address required.
-- **Storage effects:** reads claim records only.
-- **Events:** none.
-- **Errors:** none (returns boolean).
-
----
-
-## `nft` contract
-
-Non-fungible token with mint, transfer, and burn.
-
-### `init`
-
-- **Auth:** `none` (deployment only).
-- **Input validation:** must not already be initialized; admin non-zero; name/symbol non-empty.
-- **Storage effects:** writes admin, name, symbol, initialization flag.
-- **Events:** none.
-- **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidMetadata`.
-
-### `mint`
-
-Mints a new token to a recipient.
-
-- **Auth:** `admin`.
-- **Input validation:** recipient non-zero; token ID must not already exist.
-- **Storage effects:** writes token ownership record; increments total supply; assigns token ID.
-- **Events:** `mint` — topics: `[mint, recipient, token_id]`; data: `(token_id)`.
-- **Errors:** `Unauthorized`, `InvalidRecipient`, `TokenExists`.
-
-### `transfer`
-
-Transfers a token from the caller to a recipient.
-
-- **Auth:** `caller` (current owner) or an approved operator.
-- **Input validation:** token must exist; caller must be owner or approved; recipient non-zero and not the current owner.
-- **Storage effects:** updates token ownership; clears prior approval.
-- **Events:** `transfer` — topics: `[transfer, from, to, token_id]`; data: `(token_id)`.
-- **Errors:** `Unauthorized`, `TokenNotFound`, `InvalidRecipient`, `NotApproved`.
-
-### `approve`
-
-Grants an operator permission to transfer a specific token.
-
-- **Auth:** `caller` (current owner).
-- **Input validation:** token must exist; caller must be owner; operator non-zero.
-- **Storage effects:** writes per-token approval.
-- **Events:** `approval` — topics: `[approval, owner, operator, token_id]`; data: `(token_id)`.
-- **Errors:** `Unauthorized`, `TokenNotFound`, `InvalidOperator`.
-
-### `burn`
-
-Burns a token.
-
-- **Auth:** `caller` (current owner) or `admin`.
-- **Input validation:** token must exist; caller must be owner or admin.
-- **Storage effects:** deletes token ownership record; decrements total supply.
-- **Events:** `burn` — topics: `[burn, owner, token_id]`; data: `(token_id)`.
-- **Errors:** `Unauthorized`, `TokenNotFound`.
-
-### `owner_of`
-
-Read-only ownership lookup.
-
-- **Auth:** `none`.
-- **Input validation:** token must exist.
-- **Storage effects:** reads ownership record only.
-- **Events:** none.
-- **Errors:** `TokenNotFound`.
-
-### `bulk_mint_with_data`
-
-Mints multiple tokens with associated data in a single call.
-
-- **Auth:** `admin`.
-- **Input validation:**
-  - The batch must not exceed `MAX_BULK_MINT` (a conservative maximum batch size).
-  - Remaining supply must be at least the batch length; capacity is validated
-    **before any mutation**, so an over-capacity batch fails without minting.
-  - Recipients must be non-zero; token IDs must not already exist.
-- **Storage effects:** writes token ownership records and associated data; increments
-  total supply.
-- **Events:** `mint` — topics: `[mint, recipient, token_id]`; data: `(token_id)`.
-- **Errors:** `Unauthorized`, `MaxBatchExceeded`, `InsufficientSupply`,
-  `InvalidRecipient`, `TokenExists`.
-
-### `get_owner_tokens`
-
-Returns the complete list of token IDs owned by an address.
-
-- **Auth:** `none`.
-- **Input validation:** owner address required.
-- **Storage effects:** reads the owner's token list.
-- **Events:** none.
-- **Errors:** none.
-- **Deprecated:** retained for compatibility; prefer `get_owner_tokens_page`, whose
-  cost is bounded. This endpoint's read, serialization, and response cost grow without
-  bound as collections grow.
-
-### `get_owner_tokens_page`
-
-Returns a bounded page of token IDs owned by an address.
-
-- **Auth:** `none`.
-- **Input validation:**
-  - `limit` must be greater than zero and at most `MAX_OWNER_TOKENS_PAGE`.
-  - `cursor` must be `None` (first page) or a token ID previously returned as the
-    page's next cursor.
-- **Ordering:** results are returned in stable ascending token-ID order; pagination
-  preserves this ordering across calls.
-- **Return shape:** the page of token IDs plus the next cursor (`None` when the page
-  is the final page).
-- **Storage effects:** reads the owner's token list; extends the persistent TTL of
-  the owner-token storage entry.
-- **Events:** none.
-- **Errors:** `InvalidCursor`.
-
----
-
-## `router` contract
-
-Executes batched calls to target contracts.
-
-### `exec`
-
-Executes one or more calls atomically.
-
-- **Auth:** `caller` (the invoker authorizes each sub-call via its own mechanism).
-- **Input validation:**
-  - Each call must specify a valid target and non-empty calldata.
-  - The number of invocations must not exceed `MAX_INVOCATIONS`; a larger batch is
-    rejected with `TooManyInvocations` before any call is dispatched.
-  - The total serialized argument size across the batch must not exceed `MAX_ARG_BYTES`;
-    an oversized batch is rejected with `ArgumentTooLarge` before any call is dispatched.
-  - Target must be on the allowlist (if an allowlist is configured).
-- **Limits:**
-  - `MAX_INVOCATIONS` — maximum number of calls accepted in a single `exec` batch.
-  - `MAX_ARG_BYTES` — maximum total argument bytes accepted across a single `exec` batch.
-  - Both limits are enforced up front; accepted batches still execute atomically
-    (all calls succeed or the whole batch reverts).
-- **Storage effects:** delegates to targets; may update router bookkeeping (nonces/counters) if configured.
-- **Events:** `executed` — topics: `[executed, caller]`; data: `(call_count, success)`.
-- **Errors:** `Unauthorized`, `InvalidTarget`, `EmptyCalldata`, `TooManyInvocations`, `ArgumentTooLarge`, `TargetNotAllowed`, `CallFailed`.
-
-### `set_allowlist`
-
-Configures the target allowlist.
-
-- **Auth:** `admin`.
-- **Input validation:** entries must be non-zero addresses.
-- **Storage effects:** writes the allowlist.
-- **Events:** `allowlist_updated` — topics: `[allowlist_updated]`; data: `(entries)`.
-- **Errors:** `Unauthorized`, `InvalidTarget`.
-
----
-
-## `subsidy` contract
-
-Reimburses eligible callers for subsidized operations.
-
-### `init`
-
-- **Auth:** `none` (deployment only).
-- **Input validation:** must not already be initialized; admin non-zero; token non-zero.
-- **Storage effects:** writes admin, token, initialization flag.
-- **Events:** none.
-- **Errors:** `AlreadyInitialized`, `InvalidAdmin`, `InvalidToken`.
-
-### `reimburse`
-
-Reimburses a caller for a qualifying operation.
-
-- **Auth:** `caller` (the subsidized party) or `admin` on behalf of a party.
-- **Input validation:**
-  - Requested amount must be greater than zero and within the per-call cap.
-  - Caller must not exceed the per-period quota.
-  - The referenced operation must be eligible (if eligibility is enforced).
-- **Storage effects:** increments the caller's usage/quota counters; transfers tokens to the caller.
-- **Events:** `reimbursed` — topics: `[reimbursed, caller]`; data: `(amount, period)`.
-- **Errors:** `Unauthorized`, `InvalidAmount`, `ExceedsCap`, `QuotaExceeded`, `NotEligible`, `TransferFailed`.
-
-### `set_cap`
-
-Sets the per-call cap and per-period quota.
-
-- **Auth:** `admin`.
-- **Input validation:** cap and quota must be non-negative; cap must not exceed the treasury balance policy.
-- **Storage effects:** writes cap and quota configuration.
-- **Events:** `cap_updated` — topics: `[cap_updated]`; data: `(cap, quota)`.
-- **Errors:** `Unauthorized`, `InvalidAmount`.
-
----
-
-## `webauthn` contract
-
-Verifies WebAuthn assertions on-chain for use by the account contract.
-
-### `verify`
-
-Verifies a WebAuthn assertion against a supplied public key and challenge.
-
-- **Auth:** `none` (pure verification; callers enforce the result).
-- **Input validation:**
-  - Credential public key must be a valid encoded COSE key.
-  - Challenge must be non-empty and match the expected value.
-  - Authenticator data must be well-formed and include the required flags (e.g. user-present).
-  - Client data JSON hash must match the signed payload.
-  - Signature must verify against the public key over the signed payload.
-- **Storage effects:** none (stateless verification).
-- **Events:** none.
-- **Errors:** `InvalidCredential`, `ChallengeMismatch`, `MalformedAuthenticatorData`, `InvalidSignature`.
-
----
-
-## Pull-request expectations
-
-Documentation is part of the change, not an afterthought. For any pull request that
-touches a contract's public surface:
-
-1. **Update this file** if you add, remove, or change a public entrypoint, its
-   authorization, its input validation, its storage effects, its emitted events, or
-   its error surface.
-2. **Keep it derived from source.** When in doubt, the contract source is the source of
-   truth; this document must match it. If a discrepancy is found, fix the document (or
-   the code) in the same PR.
-3. **Reviewers must check** that the interface reference reflects the change. A PR that
-   changes a public entrypoint without updating this document should be blocked.
-4. **Events and errors** listed here must correspond to the identifiers actually emitted
-   or returned by the contracts.
-
-_Last reviewed against source: see the git history of this file._
+# Contract interfaces
+
+This reference describes the source in this workspace. It is reviewed manually;
+CI does not currently compare documentation with generated contract specs.
+All token amounts are signed i128 base units. See the source enums for XDR types.
+
+## Account
+
+`__constructor(Config { keys: Vec<BytesN<65>>, threshold: u32,
+rp_id_hash: BytesN<32>, origin: Bytes })` stores immutable configuration.
+There must be 1–10 unique keys and a threshold of 1 through key count.
+Keys require SEC1 prefix 04 and coordinates below the P-256 field prime;
+**the constructor does not establish curve membership or key possession**.
+Deployment preflight checks curve membership. RP hash must be nonzero.
+Origin is at most 256 bytes, begins `https://`, and rejects whitespace,
+queries, fragments and trailing slash; enrollment must enforce canonical origin
+and RP-ID relationships. No administrator, factory, recovery or key rotation exists.
+
+`Signature` is the tuple enum `Passkeys(Vec<Assertion>)` or
+`Session(BytesN<32>, BytesN<64>)`. An `Assertion` is a symbol-keyed map containing
+`key_index: u32`, `authenticator_data: Bytes`, `client_data_json: Bytes`, and
+`signature: BytesN<64>` (raw low-S r||s). Tuple enums encode as a vector beginning
+with the variant symbol. Credential IDs are not stored; enrollment maps each
+credential to a configured key index.
+
+| Entrypoint | Authorization and effect |
+| --- | --- |
+| `add_session(public_key: BytesN<32>, session: Session)` | Account auth through full passkey quorum. Replaces the record/budget. Requires positive `per_transfer`, `remaining >= per_transfer`, future timestamp expiry. |
+| `revoke_session(public_key)` | Full quorum; removes record, including when absent. |
+| `set_sessions_paused(paused: bool)` | Full quorum; freezes/resumes session authorization only. |
+| `config()` | Public immutable configuration getter. |
+| `session(public_key)` | Public optional session getter. |
+| `sessions_paused()` | Public bool getter, false initially. |
+| `__check_auth(payload, signature, contexts)` | Host custom-account callback; validates quorum or bounded session, then renews instance TTL. It is not a general callable authorization oracle. |
+
+`Session` fields: `token: Address`, `recipient: Option<Address>`,
+`per_transfer: i128`, `remaining: i128`, `expires_at: u64` (Unix seconds).
+Session contexts must all be the selected token's `transfer(account,to,amount)`;
+positive individual amounts must satisfy the cap and checked aggregate budget.
+Expiry rejects at equality. Any configured recipient must match. Ed25519 verifies
+the host authorization payload. Budget updates roll back on transaction failure.
+Events: topics `(session,set,key)` / Session, `(session,revoked,key)` / (),
+`(session,paused)` / bool, `(session,spent,key)` / (spent,remaining).
+Errors: Invalid=1, Expired=2, Scope=3, Limit=4, Paused=5,
+InvalidThreshold=6, InvalidKeyCount=7, InvalidPublicKey=8,
+InvalidRpIdHash=9, InvalidOrigin=10. Cryptographic/validation failures may trap.
+
+## WebAuthn
+
+`verify(key, rp_id_hash, origin, payload, assertion)` is a public stateless verifier
+with caller-supplied trust inputs. It grants no authority by itself. The account
+links the same verifier library and supplies its stored trust inputs.
+Verification checks RP hash, UP+UV flags, exact `webauthn.get` type, origin,
+non-cross-origin ceremony, unpadded base64url host payload challenge and ES256.
+Client JSON is limited to 2048 bytes and must parse completely. Compared strings
+must be literal, not escaped JSON strings. Unknown fields are allowed; duplicate
+known fields are rejected by serde. No credential enrollment or sign counter
+tracking occurs here. No state/events. Failures trap.
+
+## Subsidy
+
+`__constructor(admin: Address)` stores immutable administrator and epoch zero.
+`admin()`, `active_epoch()`, `is_reimbursed(id: BytesN<32>)` are public getters.
+`reimburse(id, asset: Address, recipient: Address, amount: i128)` requires admin
+auth, positive amount, unused active-epoch ID, available epoch capacity and enough
+vault token balance. It marks the ID before transfer and emits topics
+`(subsidy,id)` with `(asset,recipient,amount)`. All writes roll back on failure.
+`rotate_epoch()` requires admin auth, removes active markers and the ID list,
+checks u32 increment and emits `(epoch)` / next epoch. Old IDs become reusable.
+Each epoch accepts at most 128 reimbursements to bound instance storage.
+Errors: InvalidAmount=1, AlreadyReimbursed=2, InsufficientBalance=3,
+EpochFull=4, EpochExhausted=5. Token/auth host errors may trap.
+Storage layout changed to add an epoch ID index; this is intended for new
+instances, not an in-place migration of previously deployed vaults.
+
+## Router
+
+`exec(caller: Address, invocations: Vec<(Address,Symbol,Vec<Val>)>) -> Vec<Val>`
+requires caller auth. Up to 10 invocations, each with argument vector XDR at most
+1024 bytes, are validated before dispatch. Targets enforce their own auth; the
+router does not grant caller authority over another address. Failures revert the
+whole transaction. No router events. Errors: TooManyInvocations=1,
+ArgumentTooLarge=2. Instance TTL is renewed. Result sizes and arbitrary target
+work remain bounded by network transaction limits, not by these input caps.
+
+## Airdrop
+
+`__constructor(root_hash: BytesN<32>, token: Address, admin: Address,
+funder: Address, claim_deadline: u32)` requires admin auth and a future **ledger
+sequence**, stores immutable distribution configuration, and sets the OZ Merkle
+root (event `set_root`).
+`claim(index: u32, receiver: Address, amount: i128, proof: Vec<BytesN<32>>)`
+requires receiver auth, an open claim window and an unclaimed valid Merkle leaf
+binding index, receiver and amount. OZ records the persistent claim marker and
+emits `set_claimed`; SEP-41 transfer occurs atomically. Token contracts reject
+invalid amounts; publishers must generate positive, uniquely indexed leaves.
+`recover_unclaimed()` requires admin auth and sequence >= deadline, marks ended,
+transfers any positive balance to the fixed funder, emits `(recovered,admin)` /
+`(funder,remaining)` and renews instance TTL. Zero balance recovery is allowed.
+`claim_deadline()`, `is_ended()`, `is_claimed(index)` are public getters.
+Local errors: Ended=1000, ClaimWindowOpen=1001, InvalidClaimDeadline=1002,
+ClaimWindowClosed=1003; OZ proof/claimed errors and token/auth traps also apply.
+Persistent claim records must be restored if archived, never treated as fresh.
+
+## NFT
+
+`__constructor(owner: Address,max_supply: u32,metadata: TokenMetadata)` fixes
+owner and lifetime mint cap; metadata has `base_uri`, `name`, `symbol` strings.
+`set_metadata_uri(base_uri)`, `mint(to,token_id)`,
+`mint_with_data(to,token_id,data)` and
+`bulk_mint_with_data(Vec<(Address,u32,TokenData)>)` require owner auth.
+TokenData contains `session_id` and `resource` strings. Bulk mint is capped at 50.
+`total_supply()` counts lifetime mints (does not decrement on burn).
+`get_max_supply()`, `get_token_data(token_id)`, `get_token_metadata()`,
+`get_owner_tokens(owner)`, `get_owner_tokens_page(owner,cursor,limit)` are public.
+Pagination requires limit 1–100 and an existing token-ID cursor, sorted ascending.
+Owner lists still load the entire collection; pagination does not bound storage I/O.
+
+`balance(owner)`, `owner_of(token_id)`, `transfer(from,to,token_id)`,
+`transfer_from(spender,from,to,token_id)`,
+`approve(approver,approved,token_id,live_until_ledger)`,
+`approve_for_all(owner,operator,live_until_ledger)`, `get_approved(token_id)`,
+`is_approved_for_all(owner,operator)`, `burn(from,token_id)` and
+`burn_from(spender,from,token_id)` delegate authorization, approval expiry and
+standard events to OpenZeppelin v0.3.0. Transfers/burns also update local owner
+lists. Approval-for-all lives in temporary storage; token approvals are persistent
+with a logical expiry checked by OZ. Local code must not apply persistent TTL
+operations to temporary approval keys. Local error codes are in
+`contracts/nft/src/errors.rs`; upstream errors are in the pinned dependency.

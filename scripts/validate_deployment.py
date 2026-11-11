@@ -36,8 +36,6 @@ def strkey(value, version, label):
         )
     except ValueError:
         raise ValueError(f"{label} must be a 56-character Stellar address") from None
-    if -1 in decoded:
-        raise ValueError(f"{label} must be a 56-character Stellar address")
     # Repack 5-bit groups into bytes; 56 chars carry 280 bits, of which 35 bytes are meaningful.
     bits = 0
     accumulator = 0
@@ -64,11 +62,13 @@ def contract_address(value, label):
     return strkey(value, STRKEY_VERSION_CONTRACT, label)
 
 
-def account_or_identity(value, label):
+def account_or_identity(value, label, allow_contract=False):
     """Accept a Stellar account address or a CLI identity name (e.g. 'alice')."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a Stellar account address or identity name")
-    if len(value) == 56 and value[0] == "G":
+    if value[0] in "GCS" and len(value) >= 55:
+        if allow_contract and value[0] == "C":
+            return contract_address(value, label)
         return account_address(value, label)
     if not IDENTITY_NAME.fullmatch(value):
         raise ValueError(
@@ -112,14 +112,15 @@ def account_config(raw):
         decoded.append(point)
     if len(set(decoded)) != len(decoded):
         raise ValueError("duplicate public keys")
-    hex_bytes(config["rp_id_hash"], 32, "rp_id_hash")
+    if not any(hex_bytes(config["rp_id_hash"], 32, "rp_id_hash")):
+        raise ValueError("rp_id_hash must be nonzero")
     raw_origin = config["origin"]
-    if not isinstance(raw_origin, str) or len(raw_origin) > 1024:
-        raise ValueError("origin must be UTF-8 hex, at most 512 bytes")
+    if not isinstance(raw_origin, str) or len(raw_origin) > 512:
+        raise ValueError("origin must be UTF-8 hex, at most 256 bytes")
     try:
         origin = bytes.fromhex(raw_origin).decode("utf-8")
     except (ValueError, UnicodeDecodeError) as error:
-        raise ValueError("origin must be UTF-8 hex, at most 512 bytes") from error
+        raise ValueError("origin must be UTF-8 hex, at most 256 bytes") from error
     url = urlsplit(origin)
     if (url.scheme != "https" or not url.hostname or url.path or url.query or url.fragment
             or url.username is not None or url.password is not None
@@ -133,8 +134,8 @@ def account_config(raw):
 
 
 def validate(component, env):
-    if component not in ("core", "account", "airdrop", "nft"):
-        raise ValueError(f"unknown component {component!r}; expected core, account, airdrop or nft")
+    if component not in ("core", "account", "airdrop", "nft", "subsidy", "router", "webauthn"):
+        raise ValueError(f"unknown component {component!r}; unsupported deployment component")
     if component in ("core", "account"):
         account_config(env["ACCOUNT_CONFIG"])
     if component == "airdrop":
@@ -143,14 +144,15 @@ def validate(component, env):
             claim_deadline = int(env["CLAIM_DEADLINE"])
         except (TypeError, ValueError) as error:
             raise ValueError("CLAIM_DEADLINE must be a positive integer ledger sequence") from error
-        if claim_deadline <= 0:
+        if not 0 < claim_deadline <= 0xFFFFFFFF:
             raise ValueError("CLAIM_DEADLINE must be a positive integer ledger sequence")
     if component == "nft":
-        account_or_identity(env["OWNER"], "OWNER")
-    if component == "core":
-        account_or_identity(env["SOURCE_ACCOUNT"], "SOURCE_ACCOUNT")
-        account_or_identity(env["ADMIN"], "ADMIN")
-        account_or_identity(env["FUNDER"], "FUNDER")
+        account_or_identity(env["OWNER"], "OWNER", allow_contract=True)
+    account_or_identity(env["SOURCE_ACCOUNT"], "SOURCE_ACCOUNT")
+    if component in ("core", "subsidy", "airdrop"):
+        account_or_identity(env["ADMIN"], "ADMIN", allow_contract=True)
+    if component == "airdrop":
+        account_or_identity(env["FUNDER"], "FUNDER", allow_contract=True)
         contract_address(env["TOKEN"], "TOKEN")
     if component == "nft":
         try:

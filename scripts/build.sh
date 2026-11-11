@@ -20,7 +20,7 @@ fi
 
 # Verify the build produced predictably named WASM outputs for the build target.
 # Artifact names and checksums depend on these files existing at this path.
-target_dir="target/wasm32v1-none/release"
+target_dir="${out_dir:-target/wasm32v1-none/release}"
 if [ ! -d "$target_dir" ]; then
   echo "error: expected build target output directory '$target_dir' is missing" >&2
   exit 1
