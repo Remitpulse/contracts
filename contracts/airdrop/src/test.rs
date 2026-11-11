@@ -619,3 +619,96 @@ fn claims_close_at_deadline_before_proof_or_transfer() {
     );
     assert!(!client.is_claimed(&0));
 }
+
+/// Reconstruct the historical four-recipient fixture using SDK XDR and host SHA-256.
+/// Data lineage: philipliu/soroban-merkle-airdrop@b611ea8, merkle/receivers.json;
+/// the same proof is present in the attributed OpenZeppelin example. No upstream
+/// generator code is vendored here; redistribution rights remain separately reviewed.
+#[test]
+fn historical_fixture_reconstructs_and_binds_every_leaf_field() {
+    use soroban_sdk::{xdr::ToXdr, Bytes};
+    let e = Env::default();
+    e.mock_all_auths_allowing_non_root_auth();
+    let receivers = [
+        (
+            "GD5RUZEO3ZCW6UX6Y4FRHKC7ZWWKTKUOPCQKYKYPCF2K7M7AD7J2URPW",
+            100_000_000i128,
+        ),
+        (
+            "GAQ32GZG3X5AH2QU66WZ6HMU44UVXZOC4GZNH57KB4Y2XQBKVAK4FMJE",
+            100_000_000,
+        ),
+        (
+            "GBBGPC7OBPPDH7VL5MYGROGPIG7VXXMS5KD34YOVA7HYRLNLMU45MJ62",
+            100_000_000,
+        ),
+        (
+            "CAASCQKVVBSLREPEUGPOTQZ4BC2NDBY2MW7B2LGIGFUPIY4Z3XUZRVTX",
+            100,
+        ),
+    ];
+    let mut leaves = [[0u8; 32]; 4];
+    for (index, (address, amount)) in receivers.iter().enumerate() {
+        let encoded = crate::Receiver {
+            index: index as u32,
+            address: Address::from_str(&e, address),
+            amount: *amount,
+        }
+        .to_xdr(&e);
+        leaves[index] = e.crypto().sha256(&encoded).to_array();
+    }
+    let target = leaves[3];
+    leaves.sort_unstable();
+    let position = leaves.iter().position(|leaf| *leaf == target).unwrap();
+    let merge = |a: [u8; 32], b: [u8; 32]| {
+        let (first, second) = if a < b { (a, b) } else { (b, a) };
+        let mut data = Bytes::from_array(&e, &first);
+        data.extend_from_array(&second);
+        e.crypto().sha256(&data).to_array()
+    };
+    let parents = [merge(leaves[0], leaves[1]), merge(leaves[2], leaves[3])];
+    let root = merge(parents[0], parents[1]);
+    assert_eq!(
+        root,
+        hex!("11932105f1a4d0092e87cead3a543da5afd8adcff63f9a8ceb6c5db3c8135722")
+    );
+    let sibling = leaves[position ^ 1];
+    let other_parent = parents[(position / 2) ^ 1];
+    assert_eq!(
+        sibling,
+        hex!("fc0d9c2f46c1e910bd3af8665318714c7c97486d2a206f96236c6e7e50c080d7")
+    );
+    assert_eq!(
+        other_parent,
+        hex!("c83f7b26055572e5e84c78ec4d4f45b85b71698951077baafe195279c1f30be4")
+    );
+
+    let admin = Address::generate(&e);
+    let token = create_token_contract(&e, &admin);
+    let id = e.register(
+        AirdropContract,
+        make_args(
+            &e,
+            root,
+            token.address.clone(),
+            admin.clone(),
+            admin.clone(),
+        ),
+    );
+    let client = AirdropContractClient::new(&e, &id);
+    token.transfer(&admin, &id, &1000);
+    let recipient = Address::from_str(&e, receivers[3].0);
+    let proof = vec![
+        &e,
+        BytesN::from_array(&e, &sibling),
+        BytesN::from_array(&e, &other_parent),
+    ];
+    assert!(client.try_claim(&4, &recipient, &100, &proof).is_err());
+    assert!(client.try_claim(&3, &admin, &100, &proof).is_err());
+    assert!(client.try_claim(&3, &recipient, &101, &proof).is_err());
+    assert!(!client.is_claimed(&3));
+    client.claim(&3, &recipient, &100, &proof);
+    assert_eq!(token.balance(&recipient), 100);
+    assert!(client.is_claimed(&3));
+    assert!(client.try_claim(&3, &recipient, &100, &proof).is_err());
+}

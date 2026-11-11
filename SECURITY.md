@@ -97,6 +97,10 @@ When an exception expires, re-evaluate the advisory: update the dependency if a
 fix exists, otherwise renew the exception with an updated justification and a
 new expiry date no more than 90 days out.
 
+See [the dependency follow-up](docs/DEPENDENCY_PROVENANCE_FOLLOWUP.md) for the
+rejected patched-version resolutions, unchanged native exposure and manual
+remediation decisions. The audit gate remains failing with no exception.
+
 ## Known dependency findings — 2026-11-05
 
 `cargo-audit` 0.22.2 reports **RUSTSEC-2026-0387** against `crypto-bigint`
