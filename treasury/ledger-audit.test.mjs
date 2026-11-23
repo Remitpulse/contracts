@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
+import { Account, Asset, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
 import { auditLedger } from './ledger-audit.mjs'
 
 test('audits exact liabilities and can read snapshots from before the failed-deposit migration', () => {
@@ -49,6 +50,17 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     const migrated = auditLedger(file)
     assert.deepEqual(migrated, { ...expected, pendingFingerprint: migrated.pendingFingerprint, invalidPendingEnvelopes: 1, pendingDeposits: 0 })
     assert.notEqual(migrated.pendingFingerprint, pendingFingerprint)
+    const signer = Keypair.random()
+    const tx = new TransactionBuilder(new Account(signer.publicKey(), '0'), {
+      fee: '100', networkPassphrase: Networks.TESTNET,
+    }).setTimebounds(0, 1800000000)
+      .addOperation(Operation.payment({ destination: Keypair.random().publicKey(), asset: Asset.native(), amount: '0.0000003' }))
+      .build()
+    tx.sign(signer)
+    const recordedHash = Buffer.from(tx.hash()).toString('hex')
+    db.prepare("UPDATE withdrawal SET hash = ?, xdr = ? WHERE pending = 1").run(recordedHash, tx.toXdr())
+    db.prepare("UPDATE entry SET detail = ? WHERE kind = 'Withdrawal reserved'").run(recordedHash)
+    assert.equal(auditLedger(file).invalidPendingEnvelopes, 0)
     db.exec("UPDATE withdrawal SET hash = 'replacement' WHERE pending = 1")
     assert.notEqual(auditLedger(file).pendingFingerprint, migrated.pendingFingerprint)
     assert.equal(auditLedger(file).reservationMismatches, 1)
