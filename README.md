@@ -1,9 +1,18 @@
 # RemitPulse Stellar Testnet treasury
 
-This repository provides read-only settlement checks for the casino's native XLM treasury. The milestone uses Stellar Classic payment operations for native XLM and has no Soroban contract to deploy. Simulated wagers settle in the casino backend's SQLite ledger.
+This repository contains read-only tools for verifying native XLM wallet activity. The casino and sportsbook settle simulated balances in the [backend ledger](https://github.com/Remitpulse/backend/tree/stellar-casino-milestone). Native deposits and withdrawals use Stellar Classic payment operations.
 
-## Use
+## Install and test
 
-With Node.js 24, run `npm ci` and `npm test`. To inspect the Testnet treasury, run `npm run treasury -- balance <treasury G-address>`. To verify a casino payment, run `npm run treasury -- receipt <transaction hash> <treasury G-address>`.
+Use Node.js 24.
 
-The receipt command requires a successful, single-operation native XLM payment involving the treasury. It emits the ledger, payment direction, exact XLM and integer stroops. The explorer endpoint is fixed to Stellar Testnet. These tools require public addresses only.
+```sh
+npm ci
+npm test
+```
+
+## Verify treasury activity
+
+Run `npm run treasury -- balance <treasury G-address>` to read the treasury balance. Run `npm run treasury -- receipt <transaction hash> <treasury G-address>` to verify a wallet payment.
+
+The receipt command requires a successful transaction with one native XLM payment involving the treasury. It reports the transaction hash, ledger, payment direction, exact XLM and integer stroops. The endpoint is fixed to Stellar Testnet. Use public addresses and transaction hashes. Keep signing secrets in the backend configuration.
