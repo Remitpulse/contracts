@@ -25,3 +25,10 @@ test('rejects changes to commitment, round inputs, roll or payout', () => {
     assert.equal(verifyDiceReceipt({ ...receipt, ...alteration }), false)
   }
 })
+
+test('rejects out-of-range draws before deriving the roll', () => {
+  const clientSeed = '277cc'.padStart(64, '0')
+  const replay = { ...receipt, clientSeed, roll: 5332, payout: '0' }
+  assert.equal(verifyDiceReceipt(replay), true)
+  assert.equal(verifyDiceReceipt({ ...replay, roll: 4592, payout: receipt.payout }), false)
+})
