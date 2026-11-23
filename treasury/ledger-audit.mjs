@@ -41,10 +41,11 @@ export function auditLedger(file) {
          SELECT detail, COUNT(*) AS entries, MIN(player) AS player, MIN(amount) AS amount
          FROM entry WHERE kind = 'Withdrawal reserved' GROUP BY detail
        )
-       SELECT COUNT(*) AS count FROM withdrawal w
-       LEFT JOIN reservation r ON r.detail = w.hash
-       WHERE w.pending = 1 AND (COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
-         OR CAST(-r.amount AS TEXT) <> w.amount)`,
+       SELECT (SELECT COUNT(*) FROM withdrawal w LEFT JOIN reservation r ON r.detail = w.hash
+         WHERE COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
+           OR CAST(-r.amount AS TEXT) <> w.amount)
+       + (SELECT COUNT(*) FROM reservation r LEFT JOIN withdrawal w ON w.hash = r.detail
+         WHERE w.hash IS NULL) AS count`,
     ).get()
     const withdrawalOutcomes = db.prepare(
       `WITH outcome AS (

@@ -19,19 +19,23 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
       INSERT INTO entry VALUES
         ('one', 'Testnet deposit', 9007199254740995, 'credit'),
         ('one', 'Withdrawal reserved', -3, 'pending'),
-        ('two', 'Testnet deposit', 1, 'credit-two'),
+        ('two', 'Testnet deposit', 8, 'credit-two'),
+        ('two', 'Withdrawal reserved', -7, 'confirmed'),
         ('two', 'Demo grant', 10000000000, 'demo'),
         ('two', 'Testnet withdrawal confirmed', 0, 'confirmed');
       CREATE TABLE withdrawal (hash TEXT, player TEXT, pending INTEGER, amount TEXT, xdr TEXT);
       INSERT INTO withdrawal VALUES ('pending', 'one', 1, '3', 'signed-withdrawal'), ('confirmed', 'two', 0, '7', 'confirmed-xdr');
       CREATE TABLE deposit (hash TEXT, player TEXT, credited INTEGER, amount TEXT, wallet TEXT);
       CREATE TABLE signed_deposit (hash TEXT, xdr TEXT);
-      INSERT INTO deposit VALUES ('failed', 'one', 0, '11', 'wallet'), ('unsigned', 'one', 0, '13', 'wallet'), ('credit', 'one', 1, '9007199254740995', 'wallet'), ('credit-two', 'two', 1, '1', 'wallet');
+      INSERT INTO deposit VALUES ('failed', 'one', 0, '11', 'wallet'), ('unsigned', 'one', 0, '13', 'wallet'), ('credit', 'one', 1, '9007199254740995', 'wallet'), ('credit-two', 'two', 1, '8', 'wallet');
       INSERT INTO signed_deposit VALUES ('failed', 'signed-deposit'), ('credit', 'credited-one'), ('credit-two', 'credited-two');
     `)
     db.exec("UPDATE entry SET amount = 1 WHERE kind = 'Testnet withdrawal confirmed'")
     assert.equal(auditLedger(file).withdrawalOutcomeMismatches, 1)
     db.exec("UPDATE entry SET amount = 0 WHERE kind = 'Testnet withdrawal confirmed'")
+    db.exec("UPDATE entry SET detail = 'orphan-reserve' WHERE kind = 'Withdrawal reserved' AND detail = 'confirmed'")
+    assert.equal(auditLedger(file).reservationMismatches, 2)
+    db.exec("UPDATE entry SET detail = 'confirmed' WHERE detail = 'orphan-reserve'")
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
@@ -64,7 +68,7 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     tx.sign(signer)
     const recordedHash = Buffer.from(tx.hash()).toString('hex')
     db.prepare("UPDATE withdrawal SET hash = ?, xdr = ? WHERE pending = 1").run(recordedHash, tx.toXdr())
-    db.prepare("UPDATE entry SET detail = ? WHERE kind = 'Withdrawal reserved'").run(recordedHash)
+    db.prepare("UPDATE entry SET detail = ? WHERE kind = 'Withdrawal reserved' AND detail = 'pending'").run(recordedHash)
     assert.equal(auditLedger(file).invalidPendingEnvelopes, 0)
     db.exec("UPDATE player SET wallet = 'wrong-wallet' WHERE id = 'one'")
     assert.equal(auditLedger(file).invalidPendingEnvelopes, 1)
@@ -74,7 +78,7 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     db.exec("UPDATE withdrawal SET amount = '3' WHERE pending = 1")
     db.exec("UPDATE withdrawal SET hash = 'replacement' WHERE pending = 1")
     assert.notEqual(auditLedger(file).pendingFingerprint, migrated.pendingFingerprint)
-    assert.equal(auditLedger(file).reservationMismatches, 1)
+    assert.equal(auditLedger(file).reservationMismatches, 2)
     db.exec("UPDATE player SET testnet = testnet + CASE id WHEN 'one' THEN 1 ELSE -1 END")
     const changed = auditLedger(file)
     assert.equal(changed.liabilitiesStroops, expected.liabilitiesStroops)
