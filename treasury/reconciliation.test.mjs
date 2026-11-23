@@ -28,3 +28,12 @@ test('compares exact exported totals against the ledger snapshot cutoff', () => 
   assert.doesNotThrow(() => compareLedgerSummary(summary, { ...summary }))
   assert.throws(() => compareLedgerSummary(summary, { ...summary, reservedStroops: '3' }), /reservedStroops/)
 })
+
+
+test('compares discrepancy counts when the operator export includes ledger checks', () => {
+  const checked = { ...summary, ledgerChecks: { mismatchedPlayers: 1, missingPlayers: 2, reservationMismatches: 1 } }
+  const ledger = { ...summary, balanceMismatches: 3, reservationMismatches: 1 }
+  assert.doesNotThrow(() => compareLedgerSummary(checked, ledger))
+  assert.throws(() => compareLedgerSummary(checked, { ...ledger, balanceMismatches: 2 }), /balanceMismatches/)
+  assert.throws(() => compareLedgerSummary(checked, { ...ledger, reservationMismatches: 0 }), /reservationMismatches/)
+})

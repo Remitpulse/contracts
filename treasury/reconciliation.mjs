@@ -24,6 +24,17 @@ export function verifyReconciliation(summary) {
 export function compareLedgerSummary(summary, ledger) {
   const fields = ['availableStroops', 'reservedStroops', 'liabilitiesStroops']
   const differences = fields.filter(field => summary[field] !== ledger[field])
+  if (summary.ledgerChecks) {
+    const checks = summary.ledgerChecks
+    if (checks.mismatchedPlayers + checks.missingPlayers !== ledger.balanceMismatches) {
+      differences.push('ledgerChecks.balanceMismatches')
+    }
+    for (const field of ['reservationMismatches', 'depositCreditMismatches']) {
+      if (checks[field] !== undefined && checks[field] !== ledger[field]) {
+        differences.push('ledgerChecks.' + field)
+      }
+    }
+  }
   if (differences.length) {
     throw new Error('The ledger snapshot differs from the summary in: ' + differences.join(', '))
   }
