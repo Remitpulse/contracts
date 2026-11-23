@@ -97,3 +97,16 @@ npm run fairness:verify -- --football-source sports-ticket.json
 
 This mode queries the match by ID. A provider correction may cause an older
 ticket to differ from the current score.
+
+### Inspect a stored envelope offline
+
+Run the envelope check on the host that holds the restricted recovery files:
+
+```sh
+npm run treasury -- envelope /secure-recovery/transfer.xdr TRANSACTION_HASH
+```
+
+It verifies that the envelope hashes to the recorded transaction on Testnet
+and prints its deadline and signature count. The command does not submit the
+envelope, and the signature count does not establish that the signatures are
+valid.

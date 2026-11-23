@@ -1,3 +1,4 @@
+import { inspectEnvelope } from './envelope.mjs'
 import { readFile } from 'node:fs/promises'
 import { Horizon } from '@stellar/stellar-sdk'
 import { lookupTransfer } from './status.mjs'
@@ -9,7 +10,15 @@ const horizon = new Horizon.Server(horizonUrl)
 horizon.httpClient.defaults.timeout = 10000
 try {
   let result
-  if (command === 'balance' || command === 'reconcile') {
+  if (command === 'envelope') {
+    if (!input || !expectedTreasury || expectation.length) {
+      throw new Error('Use envelope <local-envelope.xdr> <recorded Testnet hash>.')
+    }
+    result = {
+      network: 'Stellar Testnet',
+      ...inspectEnvelope(await readFile(input, 'utf8'), expectedTreasury),
+    }
+  } else if (command === 'balance' || command === 'reconcile') {
     if (command === 'reconcile' && !/^\d{1,30}$/.test(expectedTreasury ?? '')) {
       throw new Error('Provide total recorded liabilities in integer stroops.')
     }
@@ -48,7 +57,7 @@ try {
     if (expected) assertReceiptMatches(payments[0], expected)
     result = { network: 'Stellar Testnet', hash: transaction.hash, ledger: transaction.ledger_attr, payment: payments[0] }
   } else {
-    throw new Error('Use balance, reconcile, status, receipt, or receipt-file. See README.md for arguments.')
+    throw new Error('Use balance, reconcile, status, receipt, receipt-file, or envelope. See README.md for arguments.')
   }
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
