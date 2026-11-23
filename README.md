@@ -87,3 +87,13 @@ npm run fairness:verify -- --sports sports-ticket.json
 
 The check recalculates the simulated XLM payout from the quoted odds, stake and
 ticket status. Independently compare the ticket status with the match result.
+
+With a football-data.org token set in `CASINO_FOOTBALL_DATA_TOKEN`, compare
+a provider football ticket with the provider's current regulation result:
+
+```sh
+npm run fairness:verify -- --football-source sports-ticket.json
+```
+
+This mode queries the match by ID. A provider correction may cause an older
+ticket to differ from the current score.
