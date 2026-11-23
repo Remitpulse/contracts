@@ -14,22 +14,26 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     db.exec(`
       CREATE TABLE player (id TEXT PRIMARY KEY, testnet INTEGER);
       INSERT INTO player VALUES ('one', 9007199254740992), ('two', 1);
-      CREATE TABLE withdrawal (pending INTEGER, amount TEXT);
-      INSERT INTO withdrawal VALUES (1, '3'), (0, '7');
-      CREATE TABLE deposit (hash TEXT, credited INTEGER);
+      CREATE TABLE withdrawal (hash TEXT, pending INTEGER, amount TEXT);
+      INSERT INTO withdrawal VALUES ('pending', 1, '3'), ('confirmed', 0, '7');
+      CREATE TABLE deposit (hash TEXT, credited INTEGER, amount TEXT);
       CREATE TABLE signed_deposit (hash TEXT);
-      INSERT INTO deposit VALUES ('failed', 0), ('unsigned', 0), ('credited', 1);
+      INSERT INTO deposit VALUES ('failed', 0, '11'), ('unsigned', 0, '13'), ('credited', 1, '17');
       INSERT INTO signed_deposit VALUES ('failed'), ('credited');
     `)
-    const { balanceFingerprint } = auditLedger(file)
+    const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
-      balanceFingerprint, players: 2, availableStroops: '9007199254740993', reservedStroops: '3',
+      pendingFingerprint, balanceFingerprint, players: 2, availableStroops: '9007199254740993', reservedStroops: '3',
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
     db.exec("CREATE TABLE failed_deposit (hash TEXT); INSERT INTO failed_deposit VALUES ('failed')")
-    assert.deepEqual(auditLedger(file), { ...expected, pendingDeposits: 0 })
+    const migrated = auditLedger(file)
+    assert.deepEqual(migrated, { ...expected, pendingFingerprint: migrated.pendingFingerprint, pendingDeposits: 0 })
+    assert.notEqual(migrated.pendingFingerprint, pendingFingerprint)
+    db.exec("UPDATE withdrawal SET hash = 'replacement' WHERE pending = 1")
+    assert.notEqual(auditLedger(file).pendingFingerprint, migrated.pendingFingerprint)
     db.exec("UPDATE player SET testnet = testnet + CASE id WHEN 'one' THEN 1 ELSE -1 END")
     const changed = auditLedger(file)
     assert.equal(changed.liabilitiesStroops, expected.liabilitiesStroops)
