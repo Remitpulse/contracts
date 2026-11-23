@@ -21,6 +21,17 @@ export function auditLedger(file) {
       `SELECT hash, amount FROM deposit JOIN signed_deposit USING (hash) WHERE credited = 0
        ${supportsFailedDeposits ? 'AND hash NOT IN (SELECT hash FROM failed_deposit)' : ''} ORDER BY hash`,
     ).all()
+    const mismatch = db.prepare(
+      `WITH movement AS (
+        SELECT player, SUM(amount) AS net FROM entry
+        WHERE kind IN ('Testnet deposit', 'Withdrawal reserved', 'Failed Testnet withdrawal released')
+        GROUP BY player
+      )
+      SELECT (SELECT COUNT(*) FROM player p LEFT JOIN movement m ON m.player = p.id
+        WHERE p.testnet <> COALESCE(m.net, 0))
+      + (SELECT COUNT(*) FROM movement m LEFT JOIN player p ON p.id = m.player
+        WHERE p.id IS NULL) AS count`,
+    ).get()
     const fingerprint = createHash('sha256')
     const balances = db.prepare('SELECT id, CAST(testnet AS TEXT) AS stroops FROM player ORDER BY id')
     for (const { id, stroops } of balances.iterate()) {
@@ -37,6 +48,7 @@ export function auditLedger(file) {
       pendingFingerprint: pendingFingerprint.digest('hex'),
       balanceFingerprint: fingerprint.digest('hex'),
       players: players.count,
+      balanceMismatches: mismatch.count,
       availableStroops: players.available,
       reservedStroops: reserved.toString(),
       liabilitiesStroops: (BigInt(players.available) + reserved).toString(),

@@ -14,6 +14,13 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     db.exec(`
       CREATE TABLE player (id TEXT PRIMARY KEY, testnet INTEGER);
       INSERT INTO player VALUES ('one', 9007199254740992), ('two', 1);
+      CREATE TABLE entry (player TEXT, kind TEXT, amount INTEGER);
+      INSERT INTO entry VALUES
+        ('one', 'Testnet deposit', 9007199254740995),
+        ('one', 'Withdrawal reserved', -3),
+        ('two', 'Testnet deposit', 1),
+        ('two', 'Demo grant', 10000000000),
+        ('two', 'Testnet withdrawal confirmed', 0);
       CREATE TABLE withdrawal (hash TEXT, pending INTEGER, amount TEXT);
       INSERT INTO withdrawal VALUES ('pending', 1, '3'), ('confirmed', 0, '7');
       CREATE TABLE deposit (hash TEXT, credited INTEGER, amount TEXT);
@@ -24,7 +31,7 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
-      pendingFingerprint, balanceFingerprint, players: 2, availableStroops: '9007199254740993', reservedStroops: '3',
+      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
@@ -38,6 +45,9 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     const changed = auditLedger(file)
     assert.equal(changed.liabilitiesStroops, expected.liabilitiesStroops)
     assert.notEqual(changed.balanceFingerprint, balanceFingerprint)
+    assert.equal(changed.balanceMismatches, 2)
+    db.exec("INSERT INTO entry VALUES ('orphan', 'Testnet deposit', 1)")
+    assert.equal(auditLedger(file).balanceMismatches, 3)
   } finally {
     db.close()
     rmSync(directory, { recursive: true, force: true })
