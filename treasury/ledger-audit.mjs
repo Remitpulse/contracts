@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 
 export function auditLedger(file) {
@@ -20,7 +21,13 @@ export function auditLedger(file) {
       `SELECT COUNT(*) AS count FROM deposit JOIN signed_deposit USING (hash) WHERE credited = 0
        ${supportsFailedDeposits ? 'AND hash NOT IN (SELECT hash FROM failed_deposit)' : ''}`,
     ).get()
+    const fingerprint = createHash('sha256')
+    const balances = db.prepare('SELECT id, CAST(testnet AS TEXT) AS stroops FROM player ORDER BY id')
+    for (const { id, stroops } of balances.iterate()) {
+      fingerprint.update(JSON.stringify([id, stroops]) + '\n')
+    }
     return {
+      balanceFingerprint: fingerprint.digest('hex'),
       players: players.count,
       availableStroops: players.available,
       reservedStroops: reserved.toString(),
