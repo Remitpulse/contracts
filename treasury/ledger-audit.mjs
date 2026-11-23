@@ -85,6 +85,10 @@ export function auditLedger(file) {
          WHERE d.credited = 0 AND p.id IS NULL
            ${supportsFailedDeposits ? 'AND d.hash NOT IN (SELECT hash FROM failed_deposit)' : ''}) AS count`,
     ).get()
+    const signedWithoutDeposit = db.prepare(
+      `SELECT COUNT(*) AS count FROM signed_deposit s
+       LEFT JOIN deposit d ON d.hash = s.hash WHERE d.hash IS NULL`,
+    ).get().count
     const failedDepositMismatches = supportsFailedDeposits ? db.prepare(
       `SELECT COUNT(*) AS count FROM failed_deposit f
        LEFT JOIN deposit d ON d.hash = f.hash
@@ -114,6 +118,7 @@ export function auditLedger(file) {
     return {
       invalidPendingEnvelopes,
       failedDepositMismatches,
+      signedWithoutDeposit,
       pendingFingerprint: pendingFingerprint.digest('hex'),
       balanceFingerprint: fingerprint.digest('hex'),
       players: players.count,
