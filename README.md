@@ -31,3 +31,16 @@ the roll from both seeds, and calculates the payout using integer stroops.
 To check that the commitment was present before the wager, compare the receipt
 commitment with the value captured before submitting the client seed. Pass that
 value as a second argument to make the command check it.
+
+### Check an operator transfer record
+
+Download a pending deposit or withdrawal record in the operator dashboard.
+Check it against the Testnet treasury address configured for that deployment.
+
+```sh
+npm run treasury -- receipt-file testnet-transfer.json G_TREASURY_ADDRESS
+```
+
+The check requires one successful native XLM payment in the recorded direction,
+to or from the recorded wallet, for the exact number of stroops. A transaction
+that has not appeared on Horizon cannot be verified by this command.
