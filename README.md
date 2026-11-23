@@ -61,3 +61,19 @@ The command checks SQLite integrity, individual Testnet balances, and pending
 transfer hashes and amounts. It prints aggregate liability totals and returns
 a failure status on a mismatch. Omitting the second path reports a single
 snapshot. Compare the backup and restored copy from the same cutoff.
+
+### Interpret pending transfer status
+
+```sh
+npm run treasury -- status TRANSACTION_HASH
+```
+
+- `confirmed` means Horizon recorded the transaction as successful. Match the
+  direction, counterparty, and exact amount with `receipt-file` before
+  reconciling the operator queue.
+- `failed` means Horizon recorded an unsuccessful transaction. The operator
+  can close a failed deposit without credit or return a failed withdrawal's
+  reserve.
+- `not-found` means Horizon has no record for that hash. Leave the transfer
+  pending while checking its validity window and the network. This status alone
+  is insufficient to release a reserve.
