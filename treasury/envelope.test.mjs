@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { inspectEnvelope } from './envelope.mjs'
+import { Account, Asset, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
+import { inspectEnvelope, matchesPaymentEnvelope } from './envelope.mjs'
 
 test('inspects the signed envelope expiry only when its Testnet hash matches the ledger', () => {
   const signer = Keypair.random()
@@ -35,4 +35,20 @@ test('inspects the signed envelope expiry only when its Testnet hash matches the
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+
+test('payment audit requires a valid signature from the transaction source', () => {
+  const source = Keypair.random()
+  const destination = Keypair.random().publicKey()
+  const tx = new TransactionBuilder(new Account(source.publicKey(), '0'), {
+    fee: '100', networkPassphrase: Networks.TESTNET,
+  }).setTimebounds(0, 1800000000)
+    .addOperation(Operation.payment({ destination, asset: Asset.native(), amount: '1.0000001' }))
+    .build()
+  const hash = Buffer.from(tx.hash()).toString('hex')
+  tx.sign(Keypair.random())
+  assert.equal(matchesPaymentEnvelope(tx.toXdr(), hash, '10000001', 'withdrawal', destination), false)
+  tx.sign(source)
+  assert.equal(matchesPaymentEnvelope(tx.toXdr(), hash, '10000001', 'withdrawal', destination), true)
 })

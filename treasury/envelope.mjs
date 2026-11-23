@@ -1,4 +1,4 @@
-import { Networks, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
+import { Keypair, Networks, Transaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import { hash, stroops } from './native.mjs'
 
 function readEnvelope(envelope, recordedHash) {
@@ -21,7 +21,11 @@ export function inspectEnvelope(envelope, recordedHash) {
 export function matchesPaymentEnvelope(envelope, recordedHash, amount, direction, counterparty) {
   const { transaction } = readEnvelope(envelope, recordedHash)
   const [payment] = transaction.operations
-  return transaction.signatures.length > 0 && transaction.operations.length === 1 &&
+  const signer = Keypair.fromPublicKey(transaction.source)
+  const signedBySource = transaction.signatures.some(signature =>
+    signer.verify(transaction.hash(), signature.signature),
+  )
+  return signedBySource && transaction.operations.length === 1 &&
     payment.type === 'payment' && payment.asset.isNative() && stroops(payment.amount) === amount &&
     (direction === 'deposit'
       ? (payment.source ?? transaction.source) === counterparty
