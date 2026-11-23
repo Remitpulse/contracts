@@ -8,8 +8,8 @@ try {
     throw new Error('The restored ledger does not match the source audit.')
   }
   console.log(JSON.stringify(restored ? { ...source, restoredMatches: true } : source, null, 2))
-  if (source.balanceMismatches || source.reservationMismatches) {
-    console.error('Testnet balances or withdrawal reservations do not reconcile.')
+  if (source.balanceMismatches || source.reservationMismatches || source.depositCreditMismatches) {
+    console.error('Testnet balances, deposit credits or withdrawal reservations do not reconcile.')
     process.exitCode = 1
   }
 } catch (error) {

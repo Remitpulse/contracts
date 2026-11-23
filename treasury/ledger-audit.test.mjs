@@ -23,15 +23,15 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
         ('two', 'Testnet withdrawal confirmed', 0, 'confirmed');
       CREATE TABLE withdrawal (hash TEXT, player TEXT, pending INTEGER, amount TEXT);
       INSERT INTO withdrawal VALUES ('pending', 'one', 1, '3'), ('confirmed', 'two', 0, '7');
-      CREATE TABLE deposit (hash TEXT, credited INTEGER, amount TEXT);
+      CREATE TABLE deposit (hash TEXT, player TEXT, credited INTEGER, amount TEXT);
       CREATE TABLE signed_deposit (hash TEXT);
-      INSERT INTO deposit VALUES ('failed', 0, '11'), ('unsigned', 0, '13'), ('credited', 1, '17');
-      INSERT INTO signed_deposit VALUES ('failed'), ('credited');
+      INSERT INTO deposit VALUES ('failed', 'one', 0, '11'), ('unsigned', 'one', 0, '13'), ('credit', 'one', 1, '9007199254740995'), ('credit-two', 'two', 1, '1');
+      INSERT INTO signed_deposit VALUES ('failed'), ('credit'), ('credit-two');
     `)
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
-      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
+      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, depositCreditMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
@@ -49,6 +49,9 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     assert.equal(changed.balanceMismatches, 2)
     db.exec("INSERT INTO entry VALUES ('orphan', 'Testnet deposit', 1, 'orphan-credit')")
     assert.equal(auditLedger(file).balanceMismatches, 3)
+    assert.equal(auditLedger(file).depositCreditMismatches, 1)
+    db.exec("UPDATE deposit SET amount = '2' WHERE hash = 'credit-two'")
+    assert.equal(auditLedger(file).depositCreditMismatches, 2)
   } finally {
     db.close()
     rmSync(directory, { recursive: true, force: true })

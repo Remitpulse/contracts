@@ -42,6 +42,17 @@ export function auditLedger(file) {
        WHERE w.pending = 1 AND (COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
          OR CAST(-r.amount AS TEXT) <> w.amount)`,
     ).get()
+    const depositCredits = db.prepare(
+      `WITH credit AS (
+         SELECT detail, COUNT(*) AS entries, MIN(player) AS player, MIN(amount) AS amount
+         FROM entry WHERE kind = 'Testnet deposit' GROUP BY detail
+       )
+       SELECT (SELECT COUNT(*) FROM deposit d LEFT JOIN credit c ON c.detail = d.hash
+         WHERE d.credited = 1 AND (COALESCE(c.entries, 0) <> 1 OR c.player <> d.player
+           OR CAST(c.amount AS TEXT) <> d.amount))
+       + (SELECT COUNT(*) FROM credit c LEFT JOIN deposit d ON d.hash = c.detail
+         WHERE d.credited IS NULL OR d.credited <> 1) AS count`,
+    ).get()
     const fingerprint = createHash('sha256')
     const balances = db.prepare('SELECT id, CAST(testnet AS TEXT) AS stroops FROM player ORDER BY id')
     for (const { id, stroops } of balances.iterate()) {
@@ -60,6 +71,7 @@ export function auditLedger(file) {
       players: players.count,
       balanceMismatches: mismatch.count,
       reservationMismatches: reservations.count,
+      depositCreditMismatches: depositCredits.count,
       availableStroops: players.available,
       reservedStroops: reserved.toString(),
       liabilitiesStroops: (BigInt(players.available) + reserved).toString(),
