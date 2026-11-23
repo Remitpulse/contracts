@@ -66,6 +66,12 @@ credited deposits, withdrawal reservations, and released reserves. It prints
 aggregate liability totals and returns a failure status on a mismatch. Omitting the second path reports a single
 snapshot. Compare the backup and restored copy from the same cutoff.
 
+The audit rejects deposits marked both failed and credited, signed
+envelopes without deposit records, and reservations without withdrawals.
+A closed withdrawal must have exactly one terminal entry. Confirmation
+records zero stroops because the funds were reserved earlier. A failed
+withdrawal must return exactly the amount originally reserved.
+
 ### Interpret pending transfer status
 
 ```sh
