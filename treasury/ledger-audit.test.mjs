@@ -40,7 +40,7 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
-      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, pendingReservationMismatches: 0, withdrawalOutcomeMismatches: 0, pendingWithoutPlayer: 0, invalidPendingEnvelopes: 2, depositCreditMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
+      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, pendingReservationMismatches: 0, withdrawalOutcomeMismatches: 0, pendingWithoutPlayer: 0, invalidPendingEnvelopes: 2, depositCreditMismatches: 0, failedDepositMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
@@ -55,6 +55,9 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     db.exec("UPDATE signed_deposit SET xdr = 'signed-deposit' WHERE hash = 'failed'")
     assert.equal(auditLedger(file).pendingFingerprint, pendingFingerprint)
     db.exec("CREATE TABLE failed_deposit (hash TEXT); INSERT INTO failed_deposit VALUES ('failed')")
+    db.exec("INSERT INTO failed_deposit VALUES ('credit'), ('unsigned'), ('unknown')")
+    assert.equal(auditLedger(file).failedDepositMismatches, 3)
+    db.exec("DELETE FROM failed_deposit WHERE hash <> 'failed'")
     const migrated = auditLedger(file)
     assert.deepEqual(migrated, { ...expected, pendingFingerprint: migrated.pendingFingerprint, invalidPendingEnvelopes: 1, pendingDeposits: 0 })
     assert.notEqual(migrated.pendingFingerprint, pendingFingerprint)

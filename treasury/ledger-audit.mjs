@@ -85,6 +85,12 @@ export function auditLedger(file) {
          WHERE d.credited = 0 AND p.id IS NULL
            ${supportsFailedDeposits ? 'AND d.hash NOT IN (SELECT hash FROM failed_deposit)' : ''}) AS count`,
     ).get()
+    const failedDepositMismatches = supportsFailedDeposits ? db.prepare(
+      `SELECT COUNT(*) AS count FROM failed_deposit f
+       LEFT JOIN deposit d ON d.hash = f.hash
+       LEFT JOIN signed_deposit s ON s.hash = f.hash
+       WHERE d.hash IS NULL OR s.hash IS NULL OR d.credited <> 0`,
+    ).get().count : 0
     const fingerprint = createHash('sha256')
     const balances = db.prepare('SELECT id, CAST(testnet AS TEXT) AS stroops FROM player ORDER BY id')
     for (const { id, stroops } of balances.iterate()) {
@@ -107,6 +113,7 @@ export function auditLedger(file) {
     }
     return {
       invalidPendingEnvelopes,
+      failedDepositMismatches,
       pendingFingerprint: pendingFingerprint.digest('hex'),
       balanceFingerprint: fingerprint.digest('hex'),
       players: players.count,
