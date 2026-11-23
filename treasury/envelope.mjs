@@ -18,9 +18,12 @@ export function inspectEnvelope(envelope, recordedHash) {
   return { hash: transactionHash, expiresAt, signatures: transaction.signatures.length }
 }
 
-export function matchesPaymentEnvelope(envelope, recordedHash, amount) {
+export function matchesPaymentEnvelope(envelope, recordedHash, amount, direction, counterparty) {
   const { transaction } = readEnvelope(envelope, recordedHash)
   const [payment] = transaction.operations
   return transaction.signatures.length > 0 && transaction.operations.length === 1 &&
-    payment.type === 'payment' && payment.asset.isNative() && stroops(payment.amount) === amount
+    payment.type === 'payment' && payment.asset.isNative() && stroops(payment.amount) === amount &&
+    (direction === 'deposit'
+      ? (payment.source ?? transaction.source) === counterparty
+      : payment.destination === counterparty)
 }

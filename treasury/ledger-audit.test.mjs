@@ -13,8 +13,8 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
   const db = new DatabaseSync(file)
   try {
     db.exec(`
-      CREATE TABLE player (id TEXT PRIMARY KEY, testnet INTEGER);
-      INSERT INTO player VALUES ('one', 9007199254740992), ('two', 1);
+      CREATE TABLE player (id TEXT PRIMARY KEY, testnet INTEGER, wallet TEXT);
+      INSERT INTO player VALUES ('one', 9007199254740992, NULL), ('two', 1, NULL);
       CREATE TABLE entry (player TEXT, kind TEXT, amount INTEGER, detail TEXT);
       INSERT INTO entry VALUES
         ('one', 'Testnet deposit', 9007199254740995, 'credit'),
@@ -24,9 +24,9 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
         ('two', 'Testnet withdrawal confirmed', 0, 'confirmed');
       CREATE TABLE withdrawal (hash TEXT, player TEXT, pending INTEGER, amount TEXT, xdr TEXT);
       INSERT INTO withdrawal VALUES ('pending', 'one', 1, '3', 'signed-withdrawal'), ('confirmed', 'two', 0, '7', 'confirmed-xdr');
-      CREATE TABLE deposit (hash TEXT, player TEXT, credited INTEGER, amount TEXT);
+      CREATE TABLE deposit (hash TEXT, player TEXT, credited INTEGER, amount TEXT, wallet TEXT);
       CREATE TABLE signed_deposit (hash TEXT, xdr TEXT);
-      INSERT INTO deposit VALUES ('failed', 'one', 0, '11'), ('unsigned', 'one', 0, '13'), ('credit', 'one', 1, '9007199254740995'), ('credit-two', 'two', 1, '1');
+      INSERT INTO deposit VALUES ('failed', 'one', 0, '11', 'wallet'), ('unsigned', 'one', 0, '13', 'wallet'), ('credit', 'one', 1, '9007199254740995', 'wallet'), ('credit-two', 'two', 1, '1', 'wallet');
       INSERT INTO signed_deposit VALUES ('failed', 'signed-deposit'), ('credit', 'credited-one'), ('credit-two', 'credited-two');
     `)
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
@@ -51,16 +51,21 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     assert.deepEqual(migrated, { ...expected, pendingFingerprint: migrated.pendingFingerprint, invalidPendingEnvelopes: 1, pendingDeposits: 0 })
     assert.notEqual(migrated.pendingFingerprint, pendingFingerprint)
     const signer = Keypair.random()
+    const destination = Keypair.random().publicKey()
+    db.prepare("UPDATE player SET wallet = ? WHERE id = 'one'").run(destination)
     const tx = new TransactionBuilder(new Account(signer.publicKey(), '0'), {
       fee: '100', networkPassphrase: Networks.TESTNET,
     }).setTimebounds(0, 1800000000)
-      .addOperation(Operation.payment({ destination: Keypair.random().publicKey(), asset: Asset.native(), amount: '0.0000003' }))
+      .addOperation(Operation.payment({ destination, asset: Asset.native(), amount: '0.0000003' }))
       .build()
     tx.sign(signer)
     const recordedHash = Buffer.from(tx.hash()).toString('hex')
     db.prepare("UPDATE withdrawal SET hash = ?, xdr = ? WHERE pending = 1").run(recordedHash, tx.toXdr())
     db.prepare("UPDATE entry SET detail = ? WHERE kind = 'Withdrawal reserved'").run(recordedHash)
     assert.equal(auditLedger(file).invalidPendingEnvelopes, 0)
+    db.exec("UPDATE player SET wallet = 'wrong-wallet' WHERE id = 'one'")
+    assert.equal(auditLedger(file).invalidPendingEnvelopes, 1)
+    db.prepare("UPDATE player SET wallet = ? WHERE id = 'one'").run(destination)
     db.exec("UPDATE withdrawal SET amount = '4' WHERE pending = 1")
     assert.equal(auditLedger(file).invalidPendingEnvelopes, 1)
     db.exec("UPDATE withdrawal SET amount = '3' WHERE pending = 1")

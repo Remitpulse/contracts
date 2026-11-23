@@ -13,13 +13,16 @@ export function auditLedger(file) {
     const players = db.prepare(
       'SELECT COUNT(*) AS count, CAST(COALESCE(SUM(testnet), 0) AS TEXT) AS available FROM player',
     ).get()
-    const withdrawals = db.prepare('SELECT hash, player, amount, xdr FROM withdrawal WHERE pending = 1 ORDER BY hash').all()
+    const withdrawals = db.prepare(
+      `SELECT w.hash, w.player, p.wallet, w.amount, w.xdr, 'withdrawal' AS direction
+       FROM withdrawal w LEFT JOIN player p ON p.id = w.player WHERE w.pending = 1 ORDER BY w.hash`,
+    ).all()
     const reserved = withdrawals.reduce((sum, row) => sum + BigInt(row.amount), 0n)
     const supportsFailedDeposits = db.prepare(
       "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'failed_deposit'",
     ).get()
     const pendingDeposits = db.prepare(
-      `SELECT hash, player, amount, signed_deposit.xdr FROM deposit JOIN signed_deposit USING (hash) WHERE credited = 0
+      `SELECT hash, player, deposit.wallet, amount, signed_deposit.xdr, 'deposit' AS direction FROM deposit JOIN signed_deposit USING (hash) WHERE credited = 0
        ${supportsFailedDeposits ? 'AND hash NOT IN (SELECT hash FROM failed_deposit)' : ''} ORDER BY hash`,
     ).all()
     const mismatch = db.prepare(
@@ -75,9 +78,9 @@ export function auditLedger(file) {
       pendingFingerprint.update(JSON.stringify(['withdrawal', hash, player, amount, xdr]) + '\n')
     }
     let invalidPendingEnvelopes = 0
-    for (const { hash, xdr, amount } of [...pendingDeposits, ...withdrawals]) {
+    for (const { hash, xdr, amount, direction, wallet } of [...pendingDeposits, ...withdrawals]) {
       try {
-        if (!matchesPaymentEnvelope(xdr, hash, amount)) invalidPendingEnvelopes++
+        if (!matchesPaymentEnvelope(xdr, hash, amount, direction, wallet)) invalidPendingEnvelopes++
       } catch {
         invalidPendingEnvelopes++
       }
