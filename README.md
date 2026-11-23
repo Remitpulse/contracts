@@ -113,3 +113,13 @@ It verifies that the envelope hashes to the recorded transaction on Testnet
 and prints its deadline and signature count. The command does not submit the
 envelope, and the signature count does not establish that the signatures are
 valid.
+
+### Verify a downloaded reconciliation summary
+
+```sh
+npm run treasury -- reconcile-file testnet-reconciliation.json
+```
+
+This offline check recomputes liabilities and the recorded treasury
+difference in integer stroops. If Horizon was unavailable, the result reports
+that no treasury comparison could be made.

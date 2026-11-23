@@ -1,3 +1,4 @@
+import { verifyReconciliation } from './reconciliation.mjs'
 import { inspectEnvelope } from './envelope.mjs'
 import { readFile } from 'node:fs/promises'
 import { Horizon } from '@stellar/stellar-sdk'
@@ -10,7 +11,12 @@ const horizon = new Horizon.Server(horizonUrl)
 horizon.httpClient.defaults.timeout = 10000
 try {
   let result
-  if (command === 'envelope') {
+  if (command === 'reconcile-file') {
+    if (!input || expectedTreasury !== undefined) {
+      throw new Error('Use reconcile-file <testnet-reconciliation.json>.')
+    }
+    result = verifyReconciliation(JSON.parse(await readFile(input, 'utf8')))
+  } else if (command === 'envelope') {
     if (!input || !expectedTreasury || expectation.length) {
       throw new Error('Use envelope <local-envelope.xdr> <recorded Testnet hash>.')
     }
@@ -57,7 +63,7 @@ try {
     if (expected) assertReceiptMatches(payments[0], expected)
     result = { network: 'Stellar Testnet', hash: transaction.hash, ledger: transaction.ledger_attr, payment: payments[0] }
   } else {
-    throw new Error('Use balance, reconcile, status, receipt, receipt-file, or envelope. See README.md for arguments.')
+    throw new Error('Use balance, reconcile, reconcile-file, status, receipt, receipt-file, or envelope. See README.md for arguments.')
   }
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
