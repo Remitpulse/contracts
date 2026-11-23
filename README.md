@@ -29,4 +29,5 @@ npm run fairness:verify -- dice-receipt.json
 The verifier recomputes the commitment from the revealed server seed, derives
 the roll from both seeds, and calculates the payout using integer stroops.
 To check that the commitment was present before the wager, compare the receipt
-commitment with the value captured before submitting the client seed.
+commitment with the value captured before submitting the client seed. Pass that
+value as a second argument to make the command check it.
