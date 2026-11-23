@@ -45,7 +45,10 @@ export function auditLedger(file) {
          WHERE COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
            OR CAST(-r.amount AS TEXT) <> w.amount)
        + (SELECT COUNT(*) FROM reservation r LEFT JOIN withdrawal w ON w.hash = r.detail
-         WHERE w.hash IS NULL) AS count`,
+         WHERE w.hash IS NULL) AS count,
+       (SELECT COUNT(*) FROM withdrawal w LEFT JOIN reservation r ON r.detail = w.hash
+        WHERE w.pending = 1 AND (COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
+          OR CAST(-r.amount AS TEXT) <> w.amount)) AS pendingCount`,
     ).get()
     const withdrawalOutcomes = db.prepare(
       `WITH outcome AS (
@@ -109,6 +112,7 @@ export function auditLedger(file) {
       players: players.count,
       balanceMismatches: mismatch.count,
       reservationMismatches: reservations.count,
+      pendingReservationMismatches: reservations.pendingCount,
       withdrawalOutcomeMismatches: withdrawalOutcomes.count,
       pendingWithoutPlayer: pendingWithoutPlayer.count,
       depositCreditMismatches: depositCredits.count,

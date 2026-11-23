@@ -29,8 +29,11 @@ export function compareLedgerSummary(summary, ledger) {
     if (checks.mismatchedPlayers + checks.missingPlayers !== ledger.balanceMismatches) {
       differences.push('ledgerChecks.balanceMismatches')
     }
-    for (const field of ['reservationMismatches', 'depositCreditMismatches']) {
-      if (checks[field] !== undefined && checks[field] !== ledger[field]) {
+    for (const [field, ledgerField] of [
+      ['reservationMismatches', 'pendingReservationMismatches'],
+      ['depositCreditMismatches', 'depositCreditMismatches'],
+    ]) {
+      if (checks[field] !== undefined && checks[field] !== ledger[ledgerField]) {
         differences.push('ledgerChecks.' + field)
       }
     }
