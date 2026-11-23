@@ -4,6 +4,10 @@ export async function lookupTransfer(horizon, transactionHash) {
   const id = hash(transactionHash)
   try {
     const transaction = await horizon.transactions().transaction(id).call()
+    if (typeof transaction?.successful !== 'boolean' ||
+        !Number.isSafeInteger(transaction.ledger_attr) || transaction.ledger_attr <= 0) {
+      throw new Error('Horizon returned an incomplete transfer receipt.')
+    }
     return {
       hash: id,
       status: transaction.successful ? 'confirmed' : 'failed',

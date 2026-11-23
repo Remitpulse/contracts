@@ -22,3 +22,11 @@ test('propagates service outages instead of reporting missing transfers', async 
   const outage = new Error('timeout')
   await assert.rejects(lookupTransfer(horizon(async () => { throw outage }), hash), outage)
 })
+
+test('requires a recorded outcome and ledger before reporting a terminal status', async () => {
+  for (const transaction of [
+    { ledger_attr: 42 }, { successful: false }, { successful: false, ledger_attr: 0 },
+  ]) {
+    await assert.rejects(lookupTransfer(horizon(async () => transaction), hash), /incomplete transfer receipt/)
+  }
+})
