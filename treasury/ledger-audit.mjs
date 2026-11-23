@@ -32,6 +32,16 @@ export function auditLedger(file) {
       + (SELECT COUNT(*) FROM movement m LEFT JOIN player p ON p.id = m.player
         WHERE p.id IS NULL) AS count`,
     ).get()
+    const reservations = db.prepare(
+      `WITH reservation AS (
+         SELECT detail, COUNT(*) AS entries, MIN(player) AS player, MIN(amount) AS amount
+         FROM entry WHERE kind = 'Withdrawal reserved' GROUP BY detail
+       )
+       SELECT COUNT(*) AS count FROM withdrawal w
+       LEFT JOIN reservation r ON r.detail = w.hash
+       WHERE w.pending = 1 AND (COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
+         OR CAST(-r.amount AS TEXT) <> w.amount)`,
+    ).get()
     const fingerprint = createHash('sha256')
     const balances = db.prepare('SELECT id, CAST(testnet AS TEXT) AS stroops FROM player ORDER BY id')
     for (const { id, stroops } of balances.iterate()) {
@@ -49,6 +59,7 @@ export function auditLedger(file) {
       balanceFingerprint: fingerprint.digest('hex'),
       players: players.count,
       balanceMismatches: mismatch.count,
+      reservationMismatches: reservations.count,
       availableStroops: players.available,
       reservedStroops: reserved.toString(),
       liabilitiesStroops: (BigInt(players.available) + reserved).toString(),
