@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { inspectEnvelope } from './envelope.mjs'
+import { matchesPaymentEnvelope } from './envelope.mjs'
 
 export function auditLedger(file) {
   const db = new DatabaseSync(file, { readOnly: true })
@@ -75,9 +75,9 @@ export function auditLedger(file) {
       pendingFingerprint.update(JSON.stringify(['withdrawal', hash, player, amount, xdr]) + '\n')
     }
     let invalidPendingEnvelopes = 0
-    for (const { hash, xdr } of [...pendingDeposits, ...withdrawals]) {
+    for (const { hash, xdr, amount } of [...pendingDeposits, ...withdrawals]) {
       try {
-        if (inspectEnvelope(xdr, hash).signatures === 0) invalidPendingEnvelopes++
+        if (!matchesPaymentEnvelope(xdr, hash, amount)) invalidPendingEnvelopes++
       } catch {
         invalidPendingEnvelopes++
       }
