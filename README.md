@@ -19,8 +19,10 @@ The receipt command requires a successful transaction with one native XLM paymen
 
 ## Verify a Dice receipt
 
-In RemitPulse, open Activity, expand **Dice proof**, and save the contents of
-**Proof data** as `dice-receipt.json`. On a separate machine if desired, run:
+Before wagering, expand **Pre-wager Dice proof** and select **Show next roll
+commitment**. Save the 64-character value. After the roll, open Activity,
+expand **Dice proof**, and select **Download receipt** under **Proof data**.
+To verify the file offline, run:
 
 ```sh
 npm run fairness:verify -- dice-receipt.json
@@ -30,7 +32,8 @@ The verifier recomputes the commitment from the revealed server seed, derives
 the roll from both seeds, and calculates the payout using integer stroops.
 To check that the commitment was present before the wager, compare the receipt
 commitment with the value captured before submitting the client seed. Pass that
-value as a second argument to make the command check it.
+value as a second argument to make the command check it. The Activity proof
+can also compare the saved commitment directly in the browser.
 
 ### Check an operator transfer record
 
