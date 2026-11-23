@@ -46,6 +46,22 @@ export function auditLedger(file) {
        WHERE w.pending = 1 AND (COALESCE(r.entries, 0) <> 1 OR r.player <> w.player
          OR CAST(-r.amount AS TEXT) <> w.amount)`,
     ).get()
+    const withdrawalOutcomes = db.prepare(
+      `WITH outcome AS (
+         SELECT detail, COUNT(*) AS entries, MIN(player) AS player, MIN(amount) AS amount,
+                MIN(kind) AS kind FROM entry
+         WHERE kind IN ('Testnet withdrawal confirmed', 'Failed Testnet withdrawal released')
+         GROUP BY detail
+       )
+       SELECT (SELECT COUNT(*) FROM withdrawal w LEFT JOIN outcome o ON o.detail = w.hash
+         WHERE w.pending = 0 AND (
+           COALESCE(o.entries, 0) <> 1 OR o.player <> w.player
+           OR (o.kind = 'Testnet withdrawal confirmed' AND o.amount <> 0)
+           OR (o.kind = 'Failed Testnet withdrawal released' AND CAST(o.amount AS TEXT) <> w.amount)
+         ))
+       + (SELECT COUNT(*) FROM outcome o LEFT JOIN withdrawal w ON w.hash = o.detail
+         WHERE w.hash IS NULL OR w.pending <> 0) AS count`,
+    ).get()
     const depositCredits = db.prepare(
       `WITH credit AS (
          SELECT detail, COUNT(*) AS entries, MIN(player) AS player, MIN(amount) AS amount
@@ -92,6 +108,7 @@ export function auditLedger(file) {
       players: players.count,
       balanceMismatches: mismatch.count,
       reservationMismatches: reservations.count,
+      withdrawalOutcomeMismatches: withdrawalOutcomes.count,
       pendingWithoutPlayer: pendingWithoutPlayer.count,
       depositCreditMismatches: depositCredits.count,
       availableStroops: players.available,

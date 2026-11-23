@@ -29,10 +29,13 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
       INSERT INTO deposit VALUES ('failed', 'one', 0, '11', 'wallet'), ('unsigned', 'one', 0, '13', 'wallet'), ('credit', 'one', 1, '9007199254740995', 'wallet'), ('credit-two', 'two', 1, '1', 'wallet');
       INSERT INTO signed_deposit VALUES ('failed', 'signed-deposit'), ('credit', 'credited-one'), ('credit-two', 'credited-two');
     `)
+    db.exec("UPDATE entry SET amount = 1 WHERE kind = 'Testnet withdrawal confirmed'")
+    assert.equal(auditLedger(file).withdrawalOutcomeMismatches, 1)
+    db.exec("UPDATE entry SET amount = 0 WHERE kind = 'Testnet withdrawal confirmed'")
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
     const expected = {
-      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, pendingWithoutPlayer: 0, invalidPendingEnvelopes: 2, depositCreditMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
+      pendingFingerprint, balanceFingerprint, players: 2, balanceMismatches: 0, reservationMismatches: 0, withdrawalOutcomeMismatches: 0, pendingWithoutPlayer: 0, invalidPendingEnvelopes: 2, depositCreditMismatches: 0, availableStroops: '9007199254740993', reservedStroops: '3',
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
