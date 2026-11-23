@@ -21,12 +21,12 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
         ('two', 'Testnet deposit', 1, 'credit-two'),
         ('two', 'Demo grant', 10000000000, 'demo'),
         ('two', 'Testnet withdrawal confirmed', 0, 'confirmed');
-      CREATE TABLE withdrawal (hash TEXT, player TEXT, pending INTEGER, amount TEXT);
-      INSERT INTO withdrawal VALUES ('pending', 'one', 1, '3'), ('confirmed', 'two', 0, '7');
+      CREATE TABLE withdrawal (hash TEXT, player TEXT, pending INTEGER, amount TEXT, xdr TEXT);
+      INSERT INTO withdrawal VALUES ('pending', 'one', 1, '3', 'signed-withdrawal'), ('confirmed', 'two', 0, '7', 'confirmed-xdr');
       CREATE TABLE deposit (hash TEXT, player TEXT, credited INTEGER, amount TEXT);
-      CREATE TABLE signed_deposit (hash TEXT);
+      CREATE TABLE signed_deposit (hash TEXT, xdr TEXT);
       INSERT INTO deposit VALUES ('failed', 'one', 0, '11'), ('unsigned', 'one', 0, '13'), ('credit', 'one', 1, '9007199254740995'), ('credit-two', 'two', 1, '1');
-      INSERT INTO signed_deposit VALUES ('failed'), ('credit'), ('credit-two');
+      INSERT INTO signed_deposit VALUES ('failed', 'signed-deposit'), ('credit', 'credited-one'), ('credit-two', 'credited-two');
     `)
     const { balanceFingerprint, pendingFingerprint } = auditLedger(file)
     assert.match(balanceFingerprint, /^[a-f0-9]{64}$/)
@@ -40,6 +40,10 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
     db.exec("UPDATE deposit SET player = 'two' WHERE hash = 'failed'")
     assert.notEqual(auditLedger(file).pendingFingerprint, pendingFingerprint)
     db.exec("UPDATE deposit SET player = 'one' WHERE hash = 'failed'")
+    assert.equal(auditLedger(file).pendingFingerprint, pendingFingerprint)
+    db.exec("UPDATE signed_deposit SET xdr = 'damaged' WHERE hash = 'failed'")
+    assert.notEqual(auditLedger(file).pendingFingerprint, pendingFingerprint)
+    db.exec("UPDATE signed_deposit SET xdr = 'signed-deposit' WHERE hash = 'failed'")
     assert.equal(auditLedger(file).pendingFingerprint, pendingFingerprint)
     db.exec("CREATE TABLE failed_deposit (hash TEXT); INSERT INTO failed_deposit VALUES ('failed')")
     const migrated = auditLedger(file)
