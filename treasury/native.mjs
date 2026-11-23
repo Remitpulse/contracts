@@ -26,7 +26,7 @@ export function stroops(xlm) {
 
 export function nativePayments(operations, treasury) {
   return operations.flatMap(operation => {
-    if (operation.type !== 'payment' || operation.asset_type !== 'native' ||
+    if (operation.type !== 'payment' || operation.asset_type !== 'native' || operation.from === operation.to ||
         (operation.to !== treasury && operation.from !== treasury)) return []
     return [{
       direction: operation.to === treasury ? 'inbound' : 'outbound',

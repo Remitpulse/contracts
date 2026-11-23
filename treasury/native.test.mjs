@@ -14,3 +14,10 @@ test('filters issued assets and unrelated native transfers from treasury receipt
   assert.equal(result[0].stroops, '1')
   assert.equal(result[0].direction, 'inbound')
 })
+
+test('excludes treasury self-payments from reconciliation receipts', () => {
+  const operation = {
+    type: 'payment', asset_type: 'native', from: 'TREASURY', to: 'TREASURY', amount: '1',
+  }
+  assert.deepEqual(nativePayments([operation], 'TREASURY'), [])
+})
