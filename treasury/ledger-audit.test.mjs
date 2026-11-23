@@ -35,6 +35,10 @@ test('audits exact liabilities and can read snapshots from before the failed-dep
       liabilitiesStroops: '9007199254740996', pendingDeposits: 1, pendingWithdrawals: 1,
     }
     assert.deepEqual(auditLedger(file), expected)
+    db.exec("UPDATE deposit SET player = 'two' WHERE hash = 'failed'")
+    assert.notEqual(auditLedger(file).pendingFingerprint, pendingFingerprint)
+    db.exec("UPDATE deposit SET player = 'one' WHERE hash = 'failed'")
+    assert.equal(auditLedger(file).pendingFingerprint, pendingFingerprint)
     db.exec("CREATE TABLE failed_deposit (hash TEXT); INSERT INTO failed_deposit VALUES ('failed')")
     const migrated = auditLedger(file)
     assert.deepEqual(migrated, { ...expected, pendingFingerprint: migrated.pendingFingerprint, pendingDeposits: 0 })
