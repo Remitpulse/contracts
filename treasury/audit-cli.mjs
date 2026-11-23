@@ -8,7 +8,7 @@ try {
     throw new Error('The restored ledger does not match the source audit.')
   }
   console.log(JSON.stringify(restored ? { ...source, restoredMatches: true } : source, null, 2))
-  if (source.balanceMismatches || source.reservationMismatches || source.depositCreditMismatches || source.pendingWithoutPlayer) {
+  if (source.balanceMismatches || source.reservationMismatches || source.depositCreditMismatches || source.pendingWithoutPlayer || source.invalidPendingEnvelopes) {
     console.error('The Testnet ledger contains reconciliation discrepancies.')
     process.exitCode = 1
   }
