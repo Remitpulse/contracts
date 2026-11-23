@@ -58,7 +58,10 @@ npm run treasury:audit -- /secure-backups/source.sqlite /secure-backups/restore-
 ```
 
 The command checks SQLite integrity, individual Testnet balances, and pending
-transfer hashes and amounts. It also reconciles each Testnet balance against
+transfer hashes, owners, amounts, and signed envelopes. It checks pending
+envelopes for a valid signature from the transaction source and a single
+native XLM payment matching the amount and player wallet. It also reconciles
+each Testnet balance against
 credited deposits, withdrawal reservations, and released reserves. It prints
 aggregate liability totals and returns a failure status on a mismatch. Omitting the second path reports a single
 snapshot. Compare the backup and restored copy from the same cutoff.
