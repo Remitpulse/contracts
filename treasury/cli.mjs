@@ -1,4 +1,4 @@
-import { verifyReconciliation } from './reconciliation.mjs'
+import { compareLedgerSummary, verifyReconciliation } from './reconciliation.mjs'
 import { inspectEnvelope } from './envelope.mjs'
 import { readFile } from 'node:fs/promises'
 import { Horizon } from '@stellar/stellar-sdk'
@@ -12,10 +12,16 @@ horizon.httpClient.defaults.timeout = 10000
 try {
   let result
   if (command === 'reconcile-file') {
-    if (!input || expectedTreasury !== undefined) {
-      throw new Error('Use reconcile-file <testnet-reconciliation.json>.')
+    if (!input || expectation.length) {
+      throw new Error('Use reconcile-file <testnet-reconciliation.json> [ledger.sqlite].')
     }
-    result = verifyReconciliation(JSON.parse(await readFile(input, 'utf8')))
+    const summary = JSON.parse(await readFile(input, 'utf8'))
+    result = verifyReconciliation(summary)
+    if (expectedTreasury) {
+      const { auditLedger } = await import('./ledger-audit.mjs')
+      compareLedgerSummary(summary, auditLedger(expectedTreasury))
+      result.ledgerTotalsMatch = true
+    }
   } else if (command === 'envelope') {
     if (!input || !expectedTreasury || expectation.length) {
       throw new Error('Use envelope <local-envelope.xdr> <recorded Testnet hash>.')

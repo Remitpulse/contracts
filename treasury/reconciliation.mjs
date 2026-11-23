@@ -20,3 +20,11 @@ export function verifyReconciliation(summary) {
   }
   return { network: summary.network, liabilitiesStroops: liabilities.toString(), treasuryCompared: summary.treasuryStroops !== null }
 }
+
+export function compareLedgerSummary(summary, ledger) {
+  const fields = ['availableStroops', 'reservedStroops', 'liabilitiesStroops']
+  const differences = fields.filter(field => summary[field] !== ledger[field])
+  if (differences.length) {
+    throw new Error('The ledger snapshot differs from the summary in: ' + differences.join(', '))
+  }
+}

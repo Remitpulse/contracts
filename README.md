@@ -122,4 +122,6 @@ npm run treasury -- reconcile-file testnet-reconciliation.json
 
 This offline check recomputes liabilities and the recorded treasury
 difference in integer stroops. If Horizon was unavailable, the result reports
-that no treasury comparison could be made.
+that no treasury comparison could be made. Pass an optional SQLite snapshot
+from the same cutoff to compare its available, reserved, and liability totals
+with the summary.

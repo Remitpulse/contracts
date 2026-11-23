@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { verifyReconciliation } from './reconciliation.mjs'
+import { compareLedgerSummary, verifyReconciliation } from './reconciliation.mjs'
 
 const summary = {
   network: 'stellar-testnet',
@@ -21,4 +21,10 @@ test('checks a negative treasury difference and exact liabilities above safe int
 test('permits an unavailable treasury only without a recorded difference', () => {
   assert.equal(verifyReconciliation({ ...summary, treasuryStroops: null, grossDifferenceStroops: null }).treasuryCompared, false)
   assert.throws(() => verifyReconciliation({ ...summary, treasuryStroops: null }), /requires/)
+})
+
+
+test('compares exact exported totals against the ledger snapshot cutoff', () => {
+  assert.doesNotThrow(() => compareLedgerSummary(summary, { ...summary }))
+  assert.throws(() => compareLedgerSummary(summary, { ...summary, reservedStroops: '3' }), /reservedStroops/)
 })
