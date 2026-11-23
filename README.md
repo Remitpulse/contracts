@@ -47,3 +47,17 @@ npm run treasury -- receipt-file testnet-transfer.json G_TREASURY_ADDRESS
 The check requires one successful native XLM payment in the recorded direction,
 to or from the recorded wallet, for the exact number of stroops. A transaction
 that has not appeared on Horizon cannot be verified by this command.
+
+### Compare a backup with a restored ledger
+
+After restoring a backend snapshot to an isolated directory, run the read-only
+audit against both files with Node 24.
+
+```sh
+npm run treasury:audit -- /secure-backups/source.sqlite /secure-backups/restore-drill/ledger.sqlite
+```
+
+The command checks SQLite integrity, individual Testnet balances, and pending
+transfer hashes and amounts. It prints aggregate liability totals and returns
+a failure status on a mismatch. Omitting the second path reports a single
+snapshot. Compare the backup and restored copy from the same cutoff.
