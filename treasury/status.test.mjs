@@ -10,7 +10,7 @@ const horizon = call => ({ transactions: () => ({ transaction: id => {
 
 test('distinguishes confirmed, failed and unindexed transfers', async () => {
   for (const [successful, status] of [[true, 'confirmed'], [false, 'failed']]) {
-    assert.deepEqual(await lookupTransfer(horizon(async () => ({ successful, ledger_attr: 123 })), hash),
+    assert.deepEqual(await lookupTransfer(horizon(async () => ({ hash, successful, ledger_attr: 123 })), hash),
       { hash, status, ledger: 123 })
   }
   assert.deepEqual(await lookupTransfer(horizon(async () => {
@@ -25,8 +25,9 @@ test('propagates service outages instead of reporting missing transfers', async 
 
 test('requires a recorded outcome and ledger before reporting a terminal status', async () => {
   for (const transaction of [
-    { ledger_attr: 42 }, { successful: false }, { successful: false, ledger_attr: 0 },
+    { hash, ledger_attr: 42 }, { hash, successful: false }, { hash, successful: false, ledger_attr: 0 },
+    { hash: 'b'.repeat(64), successful: true, ledger_attr: 42 },
   ]) {
-    await assert.rejects(lookupTransfer(horizon(async () => transaction), hash), /incomplete transfer receipt/)
+    await assert.rejects(lookupTransfer(horizon(async () => transaction), hash), /incomplete or mismatched transfer receipt/)
   }
 })
