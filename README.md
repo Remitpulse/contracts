@@ -78,3 +78,12 @@ npm run treasury -- status TRANSACTION_HASH
 - `not-found` means Horizon has no record for that hash. Leave the transfer
   pending while checking its validity window and the network. This status alone
   is insufficient to release a reserve.
+
+### Check a settled sports ticket
+
+```sh
+npm run fairness:verify -- --sports sports-ticket.json
+```
+
+The check recalculates the simulated XLM payout from the quoted odds, stake and
+ticket status. Independently compare the ticket status with the match result.
