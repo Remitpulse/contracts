@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { Horizon } from '@stellar/stellar-sdk'
+import { lookupTransfer } from './status.mjs'
+
 import { assertReceiptMatches, receiptExpectation, hash, horizonUrl, nativePayments, publicKey, stroops } from './native.mjs'
 
 const [command, input, expectedTreasury, ...expectation] = process.argv.slice(2)
@@ -20,6 +22,9 @@ try {
       result.liabilities = liabilities.toString()
       result.grossDifference = (BigInt(result.stroops) - liabilities).toString()
     }
+  } else if (command === 'status') {
+    if (expectedTreasury !== undefined) throw new Error('Use status <transaction hash>.')
+    result = { network: 'Stellar Testnet', ...(await lookupTransfer(horizon, input)) }
   } else if (command === 'receipt' || command === 'receipt-file') {
     if (expectation.length !== 0 && expectation.length !== 3) {
       throw new Error('Supply all three receipt fields: direction, stroops, and counterparty wallet.')
@@ -43,7 +48,7 @@ try {
     if (expected) assertReceiptMatches(payments[0], expected)
     result = { network: 'Stellar Testnet', hash: transaction.hash, ledger: transaction.ledger_attr, payment: payments[0] }
   } else {
-    throw new Error('Use balance, reconcile, receipt, or receipt-file. See README.md for arguments.')
+    throw new Error('Use balance, reconcile, status, receipt, or receipt-file. See README.md for arguments.')
   }
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
