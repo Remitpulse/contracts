@@ -2,7 +2,16 @@
   "name": "remitpulse-testnet-treasury",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
-  "scripts": { "treasury": "node treasury/cli.mjs", "test": "node --test treasury/*.test.mjs" },
-  "dependencies": { "@stellar/stellar-sdk": "^17.4.0" }
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "treasury": "node treasury/cli.mjs",
+    "test": "node --test treasury/*.test.mjs fairness/*.test.mjs",
+    "fairness:verify": "node fairness/cli.mjs",
+    "treasury:audit": "node treasury/audit-cli.mjs"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.4.0"
+  }
 }

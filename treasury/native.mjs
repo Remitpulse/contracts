@@ -26,7 +26,7 @@ export function stroops(xlm) {
 
 export function nativePayments(operations, treasury) {
   return operations.flatMap(operation => {
-    if (operation.type !== 'payment' || operation.asset_type !== 'native' ||
+    if (operation.type !== 'payment' || operation.asset_type !== 'native' || operation.from === operation.to ||
         (operation.to !== treasury && operation.from !== treasury)) return []
     return [{
       direction: operation.to === treasury ? 'inbound' : 'outbound',
@@ -37,4 +37,22 @@ export function nativePayments(operations, treasury) {
       stroops: stroops(operation.amount),
     }]
   })
+}
+
+export function receiptExpectation(direction, amount, counterparty) {
+  if (direction !== 'inbound' && direction !== 'outbound') {
+    throw new Error('Provide the expected direction as inbound or outbound.')
+  }
+  if (typeof amount !== 'string' || !/^[1-9]\d{0,18}$/.test(amount) || BigInt(amount) > 9_223_372_036_854_775_807n) {
+    throw new Error('Provide an exact positive amount in integer stroops.')
+  }
+  return { direction, stroops: amount, counterparty: publicKey(counterparty) }
+}
+
+export function assertReceiptMatches(payment, expected) {
+  const counterparty = payment.direction === 'inbound' ? payment.from : payment.to
+  if (payment.direction !== expected.direction || payment.stroops !== expected.stroops ||
+      counterparty !== expected.counterparty) {
+    throw new Error('The treasury payment does not match the recorded direction, amount, and wallet.')
+  }
 }

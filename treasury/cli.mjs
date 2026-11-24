@@ -1,27 +1,75 @@
+import { compareLedgerSummary, verifyReconciliation } from './reconciliation.mjs'
+import { inspectEnvelope } from './envelope.mjs'
+import { readFile } from 'node:fs/promises'
 import { Horizon } from '@stellar/stellar-sdk'
-import { hash, horizonUrl, nativePayments, publicKey, stroops } from './native.mjs'
+import { lookupTransfer } from './status.mjs'
 
-const [command, input, expectedTreasury] = process.argv.slice(2)
+import { assertReceiptMatches, receiptExpectation, hash, horizonUrl, nativePayments, publicKey, stroops } from './native.mjs'
+
+const [command, input, expectedTreasury, ...expectation] = process.argv.slice(2)
 const horizon = new Horizon.Server(horizonUrl)
 horizon.httpClient.defaults.timeout = 10000
 try {
   let result
-  if (command === 'balance') {
+  if (command === 'reconcile-file') {
+    if (!input || expectation.length) {
+      throw new Error('Use reconcile-file <testnet-reconciliation.json> [ledger.sqlite].')
+    }
+    const summary = JSON.parse(await readFile(input, 'utf8'))
+    result = verifyReconciliation(summary)
+    if (expectedTreasury) {
+      const { auditLedger } = await import('./ledger-audit.mjs')
+      compareLedgerSummary(summary, auditLedger(expectedTreasury))
+      result.ledgerTotalsMatch = true
+    }
+  } else if (command === 'envelope') {
+    if (!input || !expectedTreasury || expectation.length) {
+      throw new Error('Use envelope <local-envelope.xdr> <recorded Testnet hash>.')
+    }
+    result = {
+      network: 'Stellar Testnet',
+      ...inspectEnvelope(await readFile(input, 'utf8'), expectedTreasury),
+    }
+  } else if (command === 'balance' || command === 'reconcile') {
+    if (command === 'reconcile' && !/^\d{1,30}$/.test(expectedTreasury ?? '')) {
+      throw new Error('Provide total recorded liabilities in integer stroops.')
+    }
     const account = await horizon.loadAccount(publicKey(input))
     const native = account.balances.find(balance => balance.asset_type === 'native')
     if (!native) throw new Error('Account has no native XLM entry.')
     result = { network: 'Stellar Testnet', account: account.id, asset: 'XLM', amount: native.balance, stroops: stroops(native.balance) }
-  } else if (command === 'receipt') {
-    const transaction = await horizon.transactions().transaction(hash(input)).call()
+    if (command === 'reconcile') {
+      const liabilities = BigInt(expectedTreasury)
+      result.liabilities = liabilities.toString()
+      result.grossDifference = (BigInt(result.stroops) - liabilities).toString()
+    }
+  } else if (command === 'status') {
+    if (expectedTreasury !== undefined) throw new Error('Use status <transaction hash>.')
+    result = { network: 'Stellar Testnet', ...(await lookupTransfer(horizon, input)) }
+  } else if (command === 'receipt' || command === 'receipt-file') {
+    if (expectation.length !== 0 && expectation.length !== 3) {
+      throw new Error('Supply all three receipt fields: direction, stroops, and counterparty wallet.')
+    }
+    let receiptHash = input
+    let expected = expectation.length ? receiptExpectation(...expectation) : undefined
+    if (command === 'receipt-file') {
+      if (!input || expectation.length) throw new Error('Use receipt-file <record.json> <treasury G-address>.')
+      const record = JSON.parse(await readFile(input, 'utf8'))
+      if (record?.network !== 'stellar-testnet') throw new Error('Expected a Stellar Testnet transfer record.')
+      receiptHash = record.hash
+      expected = receiptExpectation(record.direction, record.stroops, record.counterparty)
+    }
     const treasury = publicKey(expectedTreasury)
+    const transaction = await horizon.transactions().transaction(hash(receiptHash)).call()
     const operations = await horizon.operations().forTransaction(transaction.hash).limit(100).call()
     const payments = nativePayments(operations.records, treasury)
     if (!transaction.successful || payments.length !== 1 || operations.records.length !== 1) {
       throw new Error('Expected a successful transaction with exactly one native XLM treasury payment.')
     }
+    if (expected) assertReceiptMatches(payments[0], expected)
     result = { network: 'Stellar Testnet', hash: transaction.hash, ledger: transaction.ledger_attr, payment: payments[0] }
   } else {
-    throw new Error('Use balance <treasury G-address> or receipt <hash> <treasury G-address>.')
+    throw new Error('Use balance, reconcile, reconcile-file, status, receipt, receipt-file, or envelope. See README.md for arguments.')
   }
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
