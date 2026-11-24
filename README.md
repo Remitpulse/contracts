@@ -2,6 +2,29 @@
 
 This repository contains read-only tools for verifying native XLM wallet activity. The casino and sportsbook settle simulated balances in the [backend ledger](https://github.com/Remitpulse/backend/tree/stellar-casino-milestone). Native deposits and withdrawals use Stellar Classic payment operations.
 
+## What this toolkit verifies
+
+```mermaid
+flowchart LR
+    UI["Wallet or operator export"] --> CLI["Treasury verification CLI"]
+    CLI --> Horizon["Stellar Testnet Horizon"]
+    DB["SQLite backup or restore"] --> Audit["Read-only ledger audit"]
+    Proof["Dice or sports receipt"] --> Fairness["Independent receipt verifier"]
+    Fairness --> Feed["Optional football data provider"]
+```
+
+| Command | Input | Checks |
+| --- | --- | --- |
+| `treasury -- balance` | Treasury G-address | Native Testnet XLM balance |
+| `treasury -- status` | Transaction hash | Confirmed, failed, or absent Horizon receipt |
+| `treasury -- receipt`, `receipt-file` | Hash or operator transfer record, plus treasury address | One successful native XLM payment and optional recorded details |
+| `treasury -- reconcile`, `reconcile-file` | Treasury and liability amount, or operator summary JSON | Exact difference in stroops |
+| `treasury -- envelope` | Local signed envelope and recorded hash | Testnet hash, expiry, and signature count |
+| `treasury:audit` | One SQLite file or a backup and restored copy | Ledger integrity, balance consistency, transfer records, and pending signatures |
+| `fairness:verify` | Dice receipt or sports ticket JSON | Dice commitment and payout, or sports outcome and payout checks |
+
+This checkout uses Stellar Classic payment records and local verification tools. The application backend handles signing, submission, and ledger changes.
+
 ## Install and test
 
 Use Node.js 24.
@@ -16,6 +39,14 @@ npm test
 Run `npm run treasury -- balance <treasury G-address>` to read the treasury balance. Run `npm run treasury -- receipt <transaction hash> <treasury G-address>` to verify a wallet payment.
 
 The receipt command requires a successful transaction with one native XLM payment involving the treasury. It reports the transaction hash, ledger, payment direction, exact XLM and integer stroops. The endpoint is fixed to Stellar Testnet. Use public addresses and transaction hashes. Keep signing secrets in the backend configuration.
+
+For a live treasury comparison, pass the total recorded liability in integer stroops:
+
+```sh
+npm run treasury -- reconcile G_TREASURY_ADDRESS LIABILITIES_IN_STROOPS
+```
+
+A result above zero is a gross difference. It does not account for spendability limits such as Stellar account reserves, or timing differences between the ledger snapshot and the Horizon response.
 
 ## Verify a Dice receipt
 
