@@ -2,6 +2,29 @@
 
 This repository contains read-only tools for verifying native XLM wallet activity. The casino and sportsbook settle simulated balances in the [backend ledger](https://github.com/Remitpulse/backend/tree/stellar-casino-milestone). Native deposits and withdrawals use Stellar Classic payment operations.
 
+## What this toolkit verifies
+
+```mermaid
+flowchart LR
+    UI["Wallet or operator export"] --> CLI["Treasury verification CLI"]
+    CLI --> Horizon["Stellar Testnet Horizon"]
+    DB["SQLite backup or restore"] --> Audit["Read-only ledger audit"]
+    Proof["Dice or sports receipt"] --> Fairness["Independent receipt verifier"]
+    Fairness --> Feed["Optional football data provider"]
+```
+
+| Command | Input | Checks |
+| --- | --- | --- |
+| `treasury -- balance` | Treasury G-address | Native Testnet XLM balance |
+| `treasury -- status` | Transaction hash | Confirmed, failed, or absent Horizon receipt |
+| `treasury -- receipt`, `receipt-file` | Hash or operator transfer record, plus treasury address | One successful native XLM payment and optional recorded details |
+| `treasury -- reconcile`, `reconcile-file` | Treasury and liability amount, or operator summary JSON | Exact difference in stroops |
+| `treasury -- envelope` | Local signed envelope and recorded hash | Testnet hash, expiry, and signature count |
+| `treasury:audit` | One SQLite file or a backup and restored copy | Ledger integrity, balance consistency, transfer records, and pending signatures |
+| `fairness:verify` | Dice receipt or sports ticket JSON | Dice commitment and payout, or sports outcome and payout checks |
+
+This checkout uses Stellar Classic payment records and local verification tools. The application backend handles signing, submission, and ledger changes.
+
 ## Install and test
 
 Use Node.js 24.
@@ -10,6 +33,23 @@ Use Node.js 24.
 npm ci
 npm test
 ```
+
+## Run the treasury CLI on its own
+
+The treasury commands run from this checkout with Node.js and the dependencies
+installed above. They have no runtime dependency on the RemitPulse frontend
+or backend. To verify a synthetic reconciliation snapshot offline, run:
+
+```sh
+npm run treasury -- reconcile-file examples/testnet-reconciliation.json
+```
+
+The result reports `25000000` stroops in liabilities and
+`treasuryCompared: true`. The sample contains illustrative amounts.
+For a native XLM receipt, use the command below with a public Testnet
+transaction hash and one of its payment addresses.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and pull request guidance.
 
 ## Verify treasury activity
 
